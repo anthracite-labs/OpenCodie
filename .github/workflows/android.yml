@@ -52,10 +52,22 @@ jobs:
           echo "$SDK/cmdline-tools/latest/bin" >>"$GITHUB_PATH"
           echo "$SDK/platform-tools" >>"$GITHUB_PATH"
           export PATH="$SDK/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --version
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-37" "platform-tools"
-          sdkmanager --list_installed | head -20
+          sdkmanager --version || true
+          sdkmanager --licenses </dev/null >/dev/null || true
+          echo "available platforms:"
+          sdkmanager --list 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -8
+          # Highest platform we can install; the pinned one when it exists.
+          TARGET="platforms;android-37"
+          sdkmanager --install "$TARGET" "platform-tools" || sdkmanager --install "$TARGET" --channel=3 || true
+          INSTALLED=$(sdkmanager --list_installed 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -1)
+          if [ -z "$INSTALLED" ]; then
+            FALLBACK=$(sdkmanager --list 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -1)
+            sdkmanager --install "$FALLBACK" "platform-tools"
+            INSTALLED=$FALLBACK
+          fi
+          echo "OPENCODIE_COMPILE_SDK=${INSTALLED##*-}" >>"$GITHUB_ENV"
+          echo "using $INSTALLED"
+          sdkmanager --list_installed 2>/dev/null | grep -E "platforms|build-tools" | head -10
 
       - name: Install Android NDK ${{ env.ANDROID_NDK_VERSION }}
         run: |
