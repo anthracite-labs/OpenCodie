@@ -1,0 +1,225 @@
+name: Build and release
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    name: Prepare OpenCode and Termux runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check source inputs
+        run: |
+          set -euo pipefail
+          for file in scripts/*.sh; do bash -n "$file"; done
+          bash -n runtime.lock
+          python3 -m py_compile scripts/*.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,xml.etree.ElementTree as ET
+          lock=Path("runtime.lock").read_text()
+          for name in ("OPENCODE_COMMIT","TERMUX_BOOTSTRAP_COMMIT","BUN_PTY_COMMIT"):
+              assert re.search(r"^"+name+r"=[0-9a-f]{40}$",lock,re.M),name
+          assert "BUN_VERSION=1.4.4" in lock
+          ET.parse("app/src/main/AndroidManifest.xml")
+          PY
+      - name: Cache prepared runtime
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/assets/runtime-aarch64.zip
+            app/src/main/assets/runtime.sha256
+            app/src/main/assets/runtime.version
+          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
+      - name: Install native build dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zip unzip xz-utils binutils curl
+          rustup target add aarch64-linux-android
+          curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
+          test "$("$HOME/.bun/bin/bun" --version)" = 1.4.4
+          curl -fsSL https://dl.google.com/android/repository/android-ndk-r28b-linux.zip -o "$RUNNER_TEMP/ndk.zip"
+          sudo unzip -q "$RUNNER_TEMP/ndk.zip" -d /opt
+      - name: Build native runtime
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          ANDROID_NDK_HOME: /opt/android-ndk-r28b
+          ANDROID_API: '29'
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          bash scripts/build-opencode.sh
+          bash scripts/build-runtime.sh
+      - name: Verify prepared runtime
+        run: |
+          set -euo pipefail
+          A=app/src/main/assets
+          test -s "$A/runtime-aarch64.zip"
+          printf '%s  %s\n' "$(cat "$A/runtime.sha256")" "$A/runtime-aarch64.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
+              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/rg",
+                        "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
+              assert not (expected-set(z.namelist())), expected-set(z.namelist())
+              assert z.testzip() is None
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-runtime
+          path: app/src/main/assets/runtime*
+          if-no-files-found: error
+          retention-days: 7
+
+  apk:
+    name: Assemble, verify and optionally release APK
+    runs-on: ubuntu-24.04
+    needs: runtime
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pinned stable Android SDK
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;36.0.0'
+          test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-runtime
+          path: app/src/main/assets
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unlock production signing key when available
+        if: github.event_name != 'pull_request'
+        env:
+          ENCRYPTION_PRIVATE_KEY: ${{ secrets.OPENCODIE_SIGNING_DECRYPT_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ENCRYPTION_PRIVATE_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::Set OPENCODIE_SIGNING_DECRYPT_KEY in repository Actions secrets before publishing a release"
+              exit 1
+            fi
+            echo "No production signing secret: PR/main APK will use unsigned release and signed debug."
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$ENCRYPTION_PRIVATE_KEY" > "$RUNNER_TEMP/decrypt.pem"
+          openssl cms -decrypt -binary -inform DER \
+            -in .github/signing/release.p12.cms \
+            -recip .github/signing/encryption-recipient.pem \
+            -inkey "$RUNNER_TEMP/decrypt.pem" \
+            -out "$RUNNER_TEMP/opencodie-release.p12"
+          openssl cms -decrypt -binary -inform DER \
+            -in .github/signing/password.txt.cms \
+            -recip .github/signing/encryption-recipient.pem \
+            -inkey "$RUNNER_TEMP/decrypt.pem" \
+            -out "$RUNNER_TEMP/signing-pass.txt"
+          pass="$(cat "$RUNNER_TEMP/signing-pass.txt")"
+          echo "::add-mask::$pass"
+          keytool -list -keystore "$RUNNER_TEMP/opencodie-release.p12" \
+            -storetype PKCS12 -storepass "$pass" -alias opencodie > /dev/null
+          keytool -exportcert -rfc -alias opencodie \
+            -keystore "$RUNNER_TEMP/opencodie-release.p12" -storepass "$pass" \
+            | openssl x509 -noout -fingerprint -sha256 \
+            > "$RUNNER_TEMP/current-fingerprint.txt"
+          openssl x509 -in .github/signing/release-public.pem -noout -fingerprint -sha256 \
+            > "$RUNNER_TEMP/expected-fingerprint.txt"
+          diff -u "$RUNNER_TEMP/expected-fingerprint.txt" "$RUNNER_TEMP/current-fingerprint.txt"
+          {
+            echo "OPENCODIE_KEYSTORE_FILE=$RUNNER_TEMP/opencodie-release.p12"
+            echo "OPENCODIE_KEYSTORE_PASSWORD=$pass"
+            echo "OPENCODIE_KEY_ALIAS=opencodie"
+            echo "OPENCODIE_KEY_PASSWORD=$pass"
+          } >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"
+      - name: Assemble release and debug APKs
+        env:
+          OPENCODIE_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease :app:assembleDebug
+      - name: Verify package, target SDK and runtime
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$APK" ]; then APK=app/build/outputs/apk/release/app-release-unsigned.apk; fi
+          test -s "$APK"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
+          grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
+          grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
+          unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
+          unzip -p "$APK" assets/runtime.sha256 > "$RUNNER_TEMP/runtime.sha256"
+          printf '%s  %s\n' "$(cat "$RUNNER_TEMP/runtime.sha256")" "$RUNNER_TEMP/runtime.zip" | sha256sum -c -
+          python3 - "$RUNNER_TEMP/runtime.zip" "$RUNNER_TEMP/opencode.bin" <<'PY'
+          import sys,zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/rg",
+                        "var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
+              assert not (required-set(z.namelist())), required-set(z.namelist())
+              with open(sys.argv[2],"wb") as out: out.write(z.read("libexec/opencode/opencode.bin"))
+          PY
+          readelf -h "$RUNNER_TEMP/opencode.bin" | grep -q 'Machine:.*AArch64'
+          if readelf -d "$RUNNER_TEMP/opencode.bin" | grep -E 'NEEDED.*(libc\.so\.6|ld-musl|libc\.musl)'; then
+            echo "::error::Non-Android libc linked"
+            exit 1
+          fi
+          if [ -n "$OPENCODIE_KEYSTORE_FILE" ]; then
+            "$BT/apksigner" verify "$APK"
+          fi
+          sha256sum "$APK"
+        env:
+          OPENCODIE_KEYSTORE_FILE: ${{ env.OPENCODIE_KEYSTORE_FILE }}
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencodie-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    name: Publish signed GitHub release
+    needs: apk
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: opencodie-apk
+          path: dist-apk
+      - name: Publish verified signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK="$(find dist-apk -type f -name 'app-release.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
+          gh release create "$GITHUB_REF_NAME" \
+            "$APK#OpenCodie-$GITHUB_REF_NAME-arm64.apk" \
+            --verify-tag --generate-notes
