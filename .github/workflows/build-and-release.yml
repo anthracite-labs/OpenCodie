@@ -43,7 +43,7 @@ jobs:
             app/src/main/assets/runtime-aarch64.zip
             app/src/main/assets/runtime.sha256
             app/src/main/assets/runtime.version
-          key: runtime-v2-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/**', 'patches/**') }}
+          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
       - name: Install native build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -92,8 +92,6 @@ jobs:
     runs-on: ubuntu-24.04
     needs: runtime
     timeout-minutes: 60
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -114,6 +112,7 @@ jobs:
           path: app/src/main/assets
       - uses: gradle/actions/setup-gradle@v4
       - name: Unlock production signing key when available
+        if: github.event_name != 'pull_request'
         env:
           ENCRYPTION_PRIVATE_KEY: ${{ secrets.OPENCODIE_SIGNING_DECRYPT_KEY }}
         run: |
@@ -202,16 +201,25 @@ jobs:
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
-      - name: Publish signed GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+  publish:
+    name: Publish signed GitHub release
+    needs: apk
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: opencodie-apk
+          path: dist-apk
+      - name: Publish verified signed APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test -n "$OPENCODIE_KEYSTORE_FILE"
-          APK=app/build/outputs/apk/release/app-release.apk
-          test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK"
+          APK="$(find dist-apk -type f -name 'app-release.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
           gh release create "$GITHUB_REF_NAME" \
             "$APK#OpenCodie-$GITHUB_REF_NAME-arm64.apk" \
             --verify-tag --generate-notes
