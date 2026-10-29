@@ -212,10 +212,8 @@ jobs:
         if: failure()
         run: |
           [ -f build.log ] || { echo "::error::build.log was not created"; exit 0; }
-          { grep -n -i -E "error:|what went wrong|unresolved|not found|FAILED|caused by" build.log | tail -8 || true
-            echo "--- last lines ---"
-            tail -n 8 build.log
-          } | cut -c1-400 | while IFS= read -r line; do
+          # The cause sits right after "What went wrong", so keep the whole tail.
+          tail -n 40 build.log | cut -c1-400 | while IFS= read -r line; do
             echo "::error::$line"
           done
       - name: Upload diagnostics
