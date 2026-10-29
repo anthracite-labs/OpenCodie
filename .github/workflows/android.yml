@@ -3,7 +3,7 @@ on:
   pull_request:
   workflow_dispatch:
 concurrency:
-  group: android-${ github.ref }
+  group: android-${{ github.ref }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
             app/src/main/assets/runtime-aarch64.zip
             app/src/main/assets/runtime.sha256
             app/src/main/assets/runtime.version
-          key: runtime-v1-${ runner.os }-${ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }
+          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
       - name: Install native build tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -46,7 +46,7 @@ jobs:
         env:
           ANDROID_NDK_HOME: /opt/android-ndk
           ANDROID_API: "29"
-          GH_TOKEN: ${ github.token }
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           export PATH="$HOME/.bun/bin:$PATH"
@@ -107,10 +107,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Configure signing key
         env:
-          STORE_BASE64: ${ secrets.OPENCODIE_KEYSTORE_BASE64 }
-          STORE_PASSWORD: ${ secrets.OPENCODIE_KEYSTORE_PASSWORD }
-          KEY_ALIAS: ${ secrets.OPENCODIE_KEY_ALIAS }
-          KEY_PASSWORD: ${ secrets.OPENCODIE_KEY_PASSWORD }
+          STORE_BASE64: ${{ secrets.OPENCODIE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           FILE="$RUNNER_TEMP/opencodie.jks"
@@ -131,7 +131,7 @@ jobs:
           echo "OPENCODIE_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Assemble release and debug APKs
         env:
-          OPENCODIE_VERSION_CODE: ${ github.run_number }
+          OPENCODIE_VERSION_CODE: ${{ github.run_number }}
         run: |
           set -euo pipefail
           ./gradlew --no-daemon :app:assembleRelease :app:assembleDebug 2>&1 | tee build.log
