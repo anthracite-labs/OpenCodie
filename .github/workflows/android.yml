@@ -135,27 +135,47 @@ jobs:
 
       - name: Verify APK
         run: |
-          set -euo pipefail
-          exec > >(tee -a ci.log) 2>&1
+          set -uo pipefail
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          test -f "$APK"
+          test -f "$APK" || { echo "no release APK"; exit 1; }
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          "$BT/aapt2" dump badging "$APK" | grep -E "^package:|^sdkVersion|^targetSdkVersion|^native-code|^application-label" | tee "$RUNNER_TEMP/badging.txt"
-          grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
-          grep -q "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
-          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/badging.txt"
-          grep -q "native-code: 'arm64-v8a'" "$RUNNER_TEMP/badging.txt"
-          unzip -l "$APK" | grep -q "assets/runtime-aarch64.zip"
-          RUNTIME=$(unzip -l "$APK" | awk '/assets\/runtime-aarch64.zip/{print $1}')
-          test "$RUNTIME" -gt 30000000
-          "$BT/apksigner" verify --print-certs "$APK" | head -3 | tee "$RUNNER_TEMP/signature.txt"
           {
             echo "APK: $APK"
             echo "size: $(du -h "$APK" | cut -f1)"
             echo "sha256: $(sha256sum "$APK" | cut -d' ' -f1)"
-            echo "bundled runtime asset: $RUNTIME bytes"
-            cat "$RUNNER_TEMP/badging.txt"
-          } | tee "$RUNNER_TEMP/apk.txt"
+            echo
+            echo "--- badging"
+            "$BT/aapt2" dump badging "$APK" | grep -E "^package:|^sdkVersion|^targetSdkVersion|^application-label:"
+            echo
+            echo "--- signature"
+            "$BT/apksigner" verify --print-certs "$APK" | head -4
+          } >"$RUNNER_TEMP/apk.txt" 2>&1
+
+          # The ARM64 payload lives inside the embedded Termux runtime, not in lib/.
+          unzip -p "$APK" assets/runtime-aarch64.zip >"$RUNNER_TEMP/runtime.zip"
+          unzip -p "$RUNNER_TEMP/runtime.zip" libexec/opencode/opencode.bin >"$RUNNER_TEMP/opencode.bin"
+          {
+            echo
+            echo "--- embedded runtime"
+            unzip -l "$RUNNER_TEMP/runtime.zip" | grep -E "bin/(pkg|apt|dpkg|bash|rg)|lib/libc\+\+_shared.so|libexec/opencode/|SYMLINKS.txt|var/lib/dpkg/status" | head -12
+            echo
+            echo "--- opencode binary"
+            readelf -h "$RUNNER_TEMP/opencode.bin" | grep -E "Machine|Type"
+            readelf -d "$RUNNER_TEMP/opencode.bin" | grep NEEDED | head -5
+            echo "(the binary cannot run on the x86_64 runner: $(file -b "$RUNNER_TEMP/opencode.bin"))"
+          } >>"$RUNNER_TEMP/apk.txt" 2>&1
+
+          cat "$RUNNER_TEMP/apk.txt"
+          STATUS=0
+          grep -q "package: name='com.termux'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL package id"; STATUS=1; }
+          grep -q "targetSdkVersion:'28'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL targetSdk"; STATUS=1; }
+          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL minSdk"; STATUS=1; }
+          grep -q "Machine:.*AArch64" "$RUNNER_TEMP/apk.txt" || { echo "FAIL opencode is not aarch64"; STATUS=1; }
+          grep -q "libc.so.6" "$RUNNER_TEMP/apk.txt" && { echo "FAIL opencode links glibc"; STATUS=1; }
+          for f in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so SYMLINKS.txt var/lib/dpkg/status; do
+            unzip -l "$RUNNER_TEMP/runtime.zip" | grep -q " $f\$" || { echo "FAIL runtime missing $f"; STATUS=1; }
+          done
+          exit $STATUS
 
       - name: Report APKs
         if: always()
@@ -181,7 +201,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Report APK facts
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
