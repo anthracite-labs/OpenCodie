@@ -118,12 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$ENCRYPTION_PRIVATE_KEY" ]; then
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              echo "::error::Set OPENCODIE_SIGNING_DECRYPT_KEY in repository Actions secrets before publishing a release"
-              exit 1
-            fi
-            echo "No production signing secret: PR/main APK will use unsigned release and signed debug."
-            exit 0
+            echo "::error::Set OPENCODIE_SIGNING_DECRYPT_KEY in repository Actions secrets to sign the APK"
+            exit 1
           fi
           umask 077
           printf '%s\n' "$ENCRYPTION_PRIVATE_KEY" > "$RUNNER_TEMP/decrypt.pem"
