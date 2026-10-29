@@ -206,6 +206,18 @@ jobs:
             echo "::error::Non-Android libc linked"; exit 1
           fi
           sha256sum "$APK" | tee -a verification.log
+      - name: Report APK facts
+        run: |
+          set -euo pipefail
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          for APK in app/build/outputs/apk/*/*.apk; do
+            echo "::notice::$APK $(stat -c%s "$APK") bytes sha256=$(sha256sum "$APK" | cut -d' ' -f1)"
+            "$BT/aapt2" dump badging "$APK" \
+              | grep -E "^package:|^sdkVersion|^targetSdkVersion|^native-code|^application-label:" \
+              | while IFS= read -r line; do echo "::notice::$line"; done
+          done
+          grep -i "Signer #1 certificate DN\|Signer #1 certificate SHA-256" verification.log \
+            | while IFS= read -r line; do echo "::notice::$line"; done || true
       - name: Upload APKs
         if: always()
         uses: actions/upload-artifact@v4
