@@ -7,4 +7,5 @@
     <string name="saved">Saved</string>
     <string name="download_failed">Download failed: %1$s</string>
     <string name="failed">OpenCodie could not start.\n\n%1$s</string>
+    <string name="tap_to_retry">Tap to retry</string>
 </resources>
