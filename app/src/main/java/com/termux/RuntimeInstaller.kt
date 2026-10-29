@@ -31,107 +31,146 @@ object RuntimeInstaller {
 
     private const val EXEC_MODE = 448 // 0700
 
+    // This marker is not in the APK ZIP. The bundled version file is NOT
+    // evidence that Termux's post-install scripts finished.
+    private const val READY_FILE = ".opencodie-ready"
+    private const val INSTALLING_FILE = ".opencodie-installing"
+
     fun installIfNeeded(context: Context, log: (String) -> Unit) {
         val files = context.filesDir
         val prefix = File(files, "usr")
         val staging = File(files, "usr-staging")
-
-        // A leftover staging directory means a previous extraction was interrupted.
-        staging.deleteRecursively()
-
+        val ready = File(files, READY_FILE)
+        val installing = File(files, INSTALLING_FILE)
         val bundled = asset(context, VERSION_ASSET).trim()
-        val installed = File(prefix, VERSION_FILE).takeIf { it.isFile }?.readText()?.trim()
+        val installed = ready.takeIf { it.isFile }?.readText()?.trim()
 
-        when {
-            installed == null -> {
-                log("Installing bundled runtime $bundled")
-                bootstrap(context, prefix, staging, log)
+        if (installed == null) {
+            if (installing.isFile) {
+                // This app owns an interrupted *first* install. Starting again
+                // is required: the upstream second-stage lock is permanent.
+                log("Retrying interrupted initial installation")
+                check(prefix.deleteRecursively()) { "Could not clear incomplete bootstrap" }
+            } else {
+                check(!prefix.exists() || prefix.listFiles()?.isEmpty() == true) {
+                    "Unverified existing Termux prefix preserved; refusing to erase user packages"
+                }
             }
-            installed != bundled -> {
-                log("Updating OpenCode $installed -> $bundled")
-                upgrade(context, prefix, log)
-            }
-            else -> log("Runtime $bundled ready")
+            installing.writeText("$bundled\n")
+            bootstrap(context, prefix, staging, log)
+            ensureDirectories(prefix)
+            runSecondStage(prefix, log)
+            writeOpenCodeConfig(log)
+            writeVersion(prefix, bundled)
+            writeMarker(ready, bundled)
+            installing.delete()
+            log("Termux runtime $bundled ready")
+            return
         }
 
-        // home, tmp and cache live outside the bootstrap archive and must exist
-        // before anything runs (APT, dpkg and the shell all rely on them).
-        File(Termux.HOME).mkdirs()
-        File(prefix, "tmp").mkdirs()
-        File(Termux.CACHE).mkdirs()
-
-        runSecondStage(prefix, log)
+        check(prefix.isDirectory) { "Verified Termux prefix missing: $prefix" }
+        // If an interrupted upgrade left backup files, rollback before retry.
+        recoverUpgrade(files, prefix, installed == bundled, log)
+        if (installed != bundled) {
+            log("Upgrading OpenCode $installed -> $bundled")
+            upgrade(context, prefix, files)
+            writeVersion(prefix, bundled)
+            writeMarker(ready, bundled)
+            clearUpgradeBackup(files)
+        }
+        ensureDirectories(prefix)
         writeOpenCodeConfig(log)
-
-        // Completion marker: only now is the runtime usable.
-        File(prefix, VERSION_FILE).apply { parentFile?.mkdirs() }.writeText("$bundled\n")
+        log("Runtime $bundled ready")
     }
 
-    /**
-     * Unpacks into a staging prefix, restores symlinks, then renames it into
-     * place. User data (home, cache) lives outside the prefix, so a failed
-     * first bootstrap is retried cleanly on the next launch.
-     */
+    private fun ensureDirectories(prefix: File) {
+        check(File(Termux.HOME).isDirectory || File(Termux.HOME).mkdirs())
+        check(File(prefix, "tmp").isDirectory || File(prefix, "tmp").mkdirs())
+        check(File(Termux.CACHE).isDirectory || File(Termux.CACHE).mkdirs())
+    }
+
+    private fun writeVersion(prefix: File, version: String) {
+        File(prefix, VERSION_FILE).apply { parentFile?.mkdirs() }.writeText("$version\n")
+    }
+
+    private fun writeMarker(marker: File, version: String) {
+        val temp = File(marker.parentFile, "${marker.name}.tmp")
+        temp.writeText("$version\n")
+        check(temp.renameTo(marker)) { "Could not record completed runtime version" }
+    }
+
     private fun bootstrap(context: Context, prefix: File, staging: File, log: (String) -> Unit) {
         verifyChecksum(context)
+        staging.deleteRecursively()
         try {
             val symlinks = extract(context, staging) { true }
             check(symlinks.isNotEmpty()) { "Runtime archive has no SYMLINKS.txt" }
-            for ((target, link) in symlinks) Os.symlink(target, link)
-            prefix.deleteRecursively()
+            for ((target, link) in symlinks) {
+                File(link).parentFile?.mkdirs()
+                Os.symlink(target, link)
+            }
+            check(!prefix.exists()) { "Refusing to replace existing Termux files" }
             check(staging.renameTo(prefix)) { "Could not move the runtime into place" }
             log("Runtime extracted")
-        } catch (e: Exception) {
+        } finally {
             staging.deleteRecursively()
-            prefix.deleteRecursively()
-            throw e
         }
     }
 
-    /** Stages the new executable and switches it without modifying installed packages. */
-    private fun upgrade(context: Context, prefix: File, log: (String) -> Unit) {
+    /** Keep both old executable and launcher until the new ready marker commits. */
+    private fun upgrade(context: Context, prefix: File, files: File) {
         verifyChecksum(context)
-        val staging = File(prefix.parentFile, "opencode-staging")
+        val staging = File(files, "opencode-staging")
         val active = File(prefix, "libexec/opencode")
-        val backup = File(prefix.parentFile, "opencode-backup")
+        val backup = File(files, "opencode-backup")
         val launcher = File(prefix, "bin/opencode")
-
-        // Recover the previous binary if power was lost between the two renames.
-        if (backup.exists() && !active.exists()) {
-            check(backup.renameTo(active)) { "Could not restore previous OpenCode binary" }
-        }
-        if (backup.exists()) backup.deleteRecursively()
+        val launcherBackup = File(files, "opencode-launcher-backup")
+        check(!backup.exists() && !launcherBackup.exists()) { "Unrecovered OpenCode backup" }
         staging.deleteRecursively()
         try {
             extract(context, staging) { name -> APK_OWNED.any { name.startsWith(it) } }
             val incoming = File(staging, "libexec/opencode")
-            val stagedLauncher = File(staging, "bin/opencode")
-            val stagedBinary = File(incoming, "opencode.bin")
-            check(stagedBinary.isFile && stagedLauncher.isFile) {
-                "Bundled runtime is missing OpenCode executable or launcher"
+            val newLauncher = File(staging, "bin/opencode")
+            val binary = File(incoming, "opencode.bin")
+            check(binary.isFile && newLauncher.isFile && launcher.isFile && active.isDirectory) {
+                "Missing OpenCode executable or launcher"
             }
-            Os.chmod(stagedBinary.path, EXEC_MODE)
-            Os.chmod(stagedLauncher.path, EXEC_MODE)
-
-            // Move the entire versioned executable directory rather than mixing
-            // old and new native files. Keep the previous directory for rollback.
-            check(!active.exists() || active.renameTo(backup)) { "Could not back up OpenCode" }
-            try {
-                check(incoming.renameTo(active)) { "Could not activate new OpenCode" }
-                val replacement = File(launcher.parentFile, "${launcher.name}.incoming")
-                stagedLauncher.copyTo(replacement, overwrite = true)
-                Os.chmod(replacement.path, EXEC_MODE)
-                check(replacement.renameTo(launcher)) { "Could not replace OpenCode launcher" }
-            } catch (e: Exception) {
-                active.deleteRecursively()
-                if (backup.exists()) check(backup.renameTo(active)) { "OpenCode rollback failed" }
-                throw e
-            }
-            backup.deleteRecursively()
-            log("OpenCode files replaced")
+            Os.chmod(binary.path, EXEC_MODE)
+            Os.chmod(newLauncher.path, EXEC_MODE)
+            launcher.copyTo(launcherBackup)
+            check(active.renameTo(backup)) { "Could not back up old OpenCode" }
+            check(incoming.renameTo(active)) { "Could not activate new OpenCode" }
+            val replacement = File(launcher.parentFile, "${launcher.name}.incoming")
+            newLauncher.copyTo(replacement, overwrite = true)
+            Os.chmod(replacement.path, EXEC_MODE)
+            check(replacement.renameTo(launcher)) { "Could not switch OpenCode launcher" }
         } finally {
             staging.deleteRecursively()
         }
+    }
+
+    private fun recoverUpgrade(files: File, prefix: File, committed: Boolean, log: (String) -> Unit) {
+        val backup = File(files, "opencode-backup")
+        val launcherBackup = File(files, "opencode-launcher-backup")
+        if (!backup.exists()) {
+            launcherBackup.delete()
+            return
+        }
+        if (committed) {
+            clearUpgradeBackup(files)
+            return
+        }
+        log("Recovering interrupted OpenCode upgrade")
+        check(File(prefix, "libexec/opencode").deleteRecursively())
+        check(backup.renameTo(File(prefix, "libexec/opencode")))
+        if (launcherBackup.isFile) {
+            check(launcherBackup.renameTo(File(prefix, "bin/opencode")))
+        }
+    }
+
+    private fun clearUpgradeBackup(files: File) {
+        File(files, "opencode-backup").deleteRecursively()
+        File(files, "opencode-launcher-backup").delete()
     }
 
     /**
@@ -211,7 +250,6 @@ object RuntimeInstaller {
         val script = File(prefix, "etc").walkTopDown()
             .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" }
             ?: error("Bundled Termux bootstrap second-stage script is missing")
-        if (File(script.parentFile, "${script.name}.lock").exists()) return
         log("Configuring Termux packages")
         val process = ProcessBuilder("${prefix.path}/bin/bash", script.path)
             .directory(File(Termux.HOME))
