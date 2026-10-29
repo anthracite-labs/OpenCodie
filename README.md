@@ -45,21 +45,35 @@ embedded runtime, signature) and uploads `opencodie-apk` plus
   completion marker are **preserved and rejected**, never silently deleted.
   Back up any installation created by an older pre-marker build before upgrading.
 
-## Signing
+## Signing and release
 
-CI signs with a keystore from these repository secrets:
+The one-time GitHub Actions signing job generated a stable PKCS12 signing key and
+committed **only encrypted** `.github/signing/release.p12.cms`,
+`.github/signing/password.txt.cms`, and the public release certificate.
+The temporary provisioning workflow has been removed.
 
-| Secret | Meaning |
-| --- | --- |
-| `OPENCODIE_KEYSTORE_BASE64` | base64 of a PKCS12/JKS keystore |
-| `OPENCODIE_KEYSTORE_PASSWORD` | store password |
-| `OPENCODIE_KEY_ALIAS` | key alias |
-| `OPENCODIE_KEY_PASSWORD` | key password (defaults to the store password) |
+**Required one-time setup:** store the corresponding private *decryption*
+key (backed up outside GitHub) as the repository Actions secret
+`OPENCODIE_SIGNING_DECRYPT_KEY`. Never commit or paste this private key
+into a pull request, log, or repository file.
 
-Without them the workflow generates a throwaway key so the artifact is still
-installable, but such builds cannot upgrade each other — set the secrets for a
-stable signing identity. Locally the same variables (`OPENCODIE_KEYSTORE_FILE`
-instead of the base64 secret) drive `app/build.gradle.kts`.
+Using the GitHub CLI from a machine with repository admin rights:
+
+```bash
+gh secret set OPENCODIE_SIGNING_DECRYPT_KEY < /secure/path/OPENCODIE_ENCRYPTION_PRIVATE_KEY.pem
+```
+
+Pull requests build the debug APK without release signing credentials.
+Pushes to main build APKs; when the signing secret is configured, the release
+APK is signed with the stable key. To publish a GitHub Release, push a
+`v*` tag on a tested commit on main. Tagged releases **fail closed** if
+the signing secret has not been configured. Preserve the decryption key
+offline: losing it prevents signing future updates with the same key.
+
+The signing certificate fingerprint is recorded in
+`.github/signing/release-public.pem`; the build verifies it before signing.
+Build and packaging CI checks do not replace testing the WebUI, PTY, package
+management and upgrade behavior on an Android device.
 
 ## Known limitations
 
