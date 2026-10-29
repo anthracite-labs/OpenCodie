@@ -99,8 +99,7 @@ $NEED"
         die "undefined __errno_location in $f — musl errno shim leaked into the bionic build"
     fi
     if [ "$NO_GLIBC" = 1 ] || [ "$NO_MUSL" = 1 ] || [ "$NO_ERRNO" = 1 ] || [ -n "$ARCH" ]; then
-        echo "check-elf: all gates passed (${#FILES[@]} file(s))"
     fi
-    exit 0
 done
+echo "check-elf: all gates passed (${#FILES[@]} file(s))"
 exit 0
