@@ -25,10 +25,12 @@ WebUI embedded), `scripts/build-runtime.sh` (Termux bootstrap + OpenCode,
 packaged as `runtime-aarch64.zip` and embedded in the APK),
 `scripts/build-release.sh` (both, then `./gradlew --no-daemon :app:assembleRelease`).
 
-CI: the **android** workflow runs on pull requests, pushes to `main`, and manual dispatch,
-builds the whole pipeline, verifies the APK (package id, SDK levels, ABI,
-embedded runtime, signature) and uploads `opencodie-apk` plus
-`opencodie-build-log`.
+CI: the **Build and release** workflow runs on pull requests, pushes to `main`,
+tags and manual dispatch, builds the whole pipeline, verifies the APK (package id,
+SDK levels, embedded runtime checksum and contents, signature when a key is
+present) and uploads `opencodie-apk` (installable APKs) and `prepared-runtime`
+(the embedded Termux + OpenCode archive). Download the APKs from the run's
+artifacts.
 
 ## Install
 
@@ -63,7 +65,8 @@ Using the GitHub CLI from a machine with repository admin rights:
 gh secret set OPENCODIE_SIGNING_DECRYPT_KEY < /secure/path/OPENCODIE_ENCRYPTION_PRIVATE_KEY.pem
 ```
 
-Pull requests build the debug APK without release signing credentials.
+Pull requests build the release (unsigned) and debug APKs without release
+signing credentials.
 Pushes to main and release tags **require** the signing secret and produce a
 release APK signed with the stable key. To publish a GitHub Release, push a
 `v*` tag on a tested commit on main. Tagged releases **fail closed** if
