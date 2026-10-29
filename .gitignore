@@ -1,0 +1,11 @@
+.gradle/
+build/
+app/build/
+local.properties
+work/
+dist/
+out/
+app/src/main/assets/runtime-aarch64.zip
+app/src/main/assets/runtime.sha256
+app/src/main/assets/runtime.version
+__pycache__/

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenCodie</string>
+    <string name="starting">Starting OpenCodie…</string>
+    <string name="reconnecting">Reconnecting to OpenCode…</string>
+    <string name="saving">Saving…</string>
+    <string name="saved">Saved</string>
+    <string name="download_failed">Download failed: %1$s</string>
+    <string name="failed">OpenCodie could not start.\n\n%1$s</string>
+</resources>
