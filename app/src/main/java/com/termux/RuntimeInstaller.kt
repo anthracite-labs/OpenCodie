@@ -52,9 +52,10 @@ object RuntimeInstaller {
                 log("Retrying interrupted initial installation")
                 check(prefix.deleteRecursively()) { "Could not clear incomplete bootstrap" }
             } else {
-                check(!prefix.exists() || prefix.listFiles()?.isEmpty() == true) {
+                check(!prefix.exists() || (prefix.isDirectory && prefix.listFiles()?.isEmpty() == true)) {
                     "Unverified existing Termux prefix preserved; refusing to erase user packages"
                 }
+                if (prefix.exists()) check(prefix.delete()) { "Could not clear empty prefix" }
             }
             installing.writeText("$bundled\n")
             bootstrap(context, prefix, staging, log)
