@@ -190,7 +190,7 @@ jobs:
           "$BT/apksigner" verify --print-certs "$APK" | tee verification.log
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
-          "$BT/aapt2" dump xmltree "$APK" AndroidManifest.xml > "$RUNNER_TEMP/manifest.txt"
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > "$RUNNER_TEMP/manifest.txt"
           python3 - "$RUNNER_TEMP/manifest.txt" <<'PY'
           import re,sys
           data=open(sys.argv[1]).read()
