@@ -55,7 +55,10 @@ class MainActivity : Activity() {
             webViewClient = client
             webChromeClient = chrome
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                if (url.startsWith("http")) download(url, contentDisposition, mimeType)
+                val uri = Uri.parse(url)
+                if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
+                    uri.port == OpenCodeHost.PORT
+                ) download(url, contentDisposition, mimeType)
             }
         }
         setContentView(FrameLayout(this).apply {
@@ -70,7 +73,7 @@ class MainActivity : Activity() {
     private val client = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
-            if (url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
+            if (url.scheme == "http" && url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
             openExternally(url)
             return true
         }
