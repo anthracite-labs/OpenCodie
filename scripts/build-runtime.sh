@@ -14,6 +14,8 @@ DIST="${DIST:-$REPO_ROOT/dist}"
 ASSETS="$REPO_ROOT/app/src/main/assets"
 STAGE="$WORK/runtime/rootfs"
 BOOTSTRAP="$WORK/bootstrap-aarch64.zip"
+BOOTSTRAP_KEY="$WORK/bootstrap-aarch64.inputs"
+EXPECTED_INPUTS="$TERMUX_BOOTSTRAP_COMMIT:$TERMUX_BOOTSTRAP_PACKAGES"
 ARCHIVE="$REPO_ROOT/runtime-aarch64.zip"
 
 test -x "$DIST/opencode/opencode" && test -x "$DIST/opencode/opencode.bin" || {
@@ -22,7 +24,7 @@ test -x "$DIST/opencode/opencode" && test -x "$DIST/opencode/opencode.bin" || {
 }
 
 echo "==> termux bootstrap $TERMUX_BOOTSTRAP_TAG @ $TERMUX_BOOTSTRAP_COMMIT"
-if [ ! -f "$BOOTSTRAP" ]; then
+if [ ! -f "$BOOTSTRAP" ] || [ "$(cat "$BOOTSTRAP_KEY" 2>/dev/null || true)" != "$EXPECTED_INPUTS" ]; then
     TERMUX="$WORK/termux-packages"
     if [ ! -d "$TERMUX/.git" ]; then
         mkdir -p "$WORK"
@@ -44,6 +46,7 @@ if [ ! -f "$BOOTSTRAP" ]; then
             --add "$TERMUX_BOOTSTRAP_PACKAGES"
     )
     mv "$TERMUX/bootstrap-aarch64.zip" "$BOOTSTRAP"
+    printf '%s\n' "$EXPECTED_INPUTS" > "$BOOTSTRAP_KEY"
 fi
 
 echo "==> stage runtime"

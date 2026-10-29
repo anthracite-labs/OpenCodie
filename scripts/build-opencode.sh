@@ -56,12 +56,12 @@ apply_patch watcher-android.patch
 
 echo "==> javascript dependencies"
 cd "$UPSTREAM"
-bun install --ignore-scripts
+bun install --frozen-lockfile --ignore-scripts
 python3 "$REPO_ROOT/scripts/patch-opentui-loader.py" "$UPSTREAM"
 # The compile embeds natives for the build target, so every platform variant
 # (including the Android file watcher and the linux-arm64-musl PTY slot) must be
 # on disk before the bundler runs.
-bun install --os="*" --cpu="*" --libc="*"
+bun install --frozen-lockfile --os="*" --cpu="*" --libc="*"
 
 # Bun skips some os:android optionals even with --os="*"; fetch them verbatim.
 ensure_npm_package() {

@@ -98,8 +98,6 @@ $NEED"
     if [ "$NO_ERRNO" = 1 ] && "$NM_BIN" -D -u "$f" 2>/dev/null | grep -q __errno_location; then
         die "undefined __errno_location in $f — musl errno shim leaked into the bionic build"
     fi
-    if [ "$NO_GLIBC" = 1 ] || [ "$NO_MUSL" = 1 ] || [ "$NO_ERRNO" = 1 ] || [ -n "$ARCH" ]; then
-    fi
 done
 echo "check-elf: all gates passed (${#FILES[@]} file(s))"
 exit 0
