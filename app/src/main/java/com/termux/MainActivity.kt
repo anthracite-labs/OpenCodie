@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
+    private var loadFailed = false
     private var fileChooser: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
 
@@ -79,12 +80,13 @@ class MainActivity : Activity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            status.visibility = View.GONE
+            if (!loadFailed) status.visibility = View.GONE
         }
 
         /** The supervisor restarts a dead server; keep the user informed meanwhile. */
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
+            loadFailed = true
             status.visibility = View.VISIBLE
             status.text = getString(R.string.reconnecting)
         }
@@ -153,16 +155,28 @@ class MainActivity : Activity() {
         show(getString(R.string.saving))
         Thread {
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
-                CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
-                connection.connectTimeout = 10_000
-                connection.inputStream.use { input ->
-                    contentResolver.openOutputStream(destination, "w").use { output ->
-                        checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
-                    }
+                val uri = Uri.parse(url)
+                check(uri.scheme == "http" && uri.host == OpenCodeHost.HOST && uri.port == OpenCodeHost.PORT) {
+                    "Download URL is not the local OpenCode server"
                 }
-                show(getString(R.string.saved))
+                val connection = URL(url).openConnection() as HttpURLConnection
+                try {
+                    // Never forward the WebView session cookie to a redirected host.
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 10_000
+                    connection.readTimeout = 30_000
+                    CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
+                    check(connection.responseCode in 200..299) { "Download HTTP ${connection.responseCode}" }
+                    connection.inputStream.use { input ->
+                        contentResolver.openOutputStream(destination, "w").use { output ->
+                            checkNotNull(output) { "Could not open $destination" }
+                            input.copyTo(output)
+                        }
+                    }
+                    show(getString(R.string.saved))
+                } finally {
+                    connection.disconnect()
+                }
             } catch (e: Exception) {
                 show(getString(R.string.download_failed, e.message ?: e.toString()))
             }
@@ -179,9 +193,11 @@ class MainActivity : Activity() {
             val url = OpenCodeHost.pairingUrl
             when {
                 url != null -> {
-                    status.visibility = View.GONE
-                    if (url != loadedUrl) {
+                    if (url != loadedUrl || loadFailed) {
                         loadedUrl = url
+                        loadFailed = false
+                        status.visibility = View.VISIBLE
+                        status.text = getString(R.string.reconnecting)
                         webView.loadUrl(url)
                     }
                 }
@@ -211,8 +227,9 @@ class MainActivity : Activity() {
     }
 
     private fun openExternally(url: Uri) {
+        if (url.scheme !in listOf("http", "https", "mailto", "tel")) return
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, url))
+            startActivity(Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE))
         } catch (e: ActivityNotFoundException) {
             show(getString(R.string.failed, url.toString()))
         }
