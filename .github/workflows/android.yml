@@ -121,13 +121,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Select installed Android SDK
+      - name: Install pinned stable Android SDK
         run: |
           set -euo pipefail
-          test -d "$ANDROID_HOME/platforms"
-          PLATFORM=$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-[0-9]*' | sed 's@.*/android-@@' | sort -n | tail -1)
-          test -n "$PLATFORM" && test -s "$ANDROID_HOME/platforms/android-$PLATFORM/android.jar"
-          echo "OPENCODIE_COMPILE_SDK=$PLATFORM" >> "$GITHUB_ENV"
+          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+          test -s "$ANDROID_HOME/platforms/android-37/android.jar"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          echo "Using stable Android SDK 37; targetSdk remains 28"
       - uses: actions/download-artifact@v4
         with:
           name: prepared-runtime
@@ -168,7 +169,7 @@ jobs:
           set -euo pipefail
           APK=app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
-          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          BT="$ANDROID_HOME/build-tools/36.0.0"
           test -x "$BT/aapt2" && test -x "$BT/apksigner"
           "$BT/apksigner" verify --print-certs "$APK" | tee verification.log
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
