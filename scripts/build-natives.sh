@@ -36,11 +36,16 @@ if [ ! -d "$SRC/.git" ]; then
     mkdir -p "$WORK"
     git clone --depth 1 --branch "v$BUN_PTY_VERSION" https://github.com/sursaone/bun-pty.git "$SRC"
 fi
-# portable-pty 0.8 pulls termios/serial, which cannot build for Android;
-# 0.9 uses serial2 and compiles unchanged (the patch is idempotent).
-if patch --dry-run -p1 -s -d "$SRC" -i "$REPO_ROOT/patches/bun-pty-portable09.patch" >/dev/null 2>&1; then
-    patch -p1 -s -d "$SRC" -i "$REPO_ROOT/patches/bun-pty-portable09.patch"
-    echo "applied bun-pty-portable09.patch"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$BUN_PTY_COMMIT" || {
+    echo "bun-pty source commit differs from runtime.lock" >&2
+    exit 1
+}
+# A required patch must either apply or already be applied.
+if git -C "$SRC" apply --reverse --check "$REPO_ROOT/patches/bun-pty-portable09.patch" 2>/dev/null; then
+    echo "bun-pty patch already applied"
+else
+    git -C "$SRC" apply --check "$REPO_ROOT/patches/bun-pty-portable09.patch"
+    git -C "$SRC" apply "$REPO_ROOT/patches/bun-pty-portable09.patch"
 fi
 
 echo "==> cargo build $TARGET"
