@@ -143,7 +143,7 @@ jobs:
         env:
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
         run: |
-          set -euo pipefail
+          set -o pipefail
           ./gradlew --no-daemon :app:assembleRelease :app:assembleDebug 2>&1 | tee build.log
       - name: Verify signed APK and bundled files
         run: |
@@ -190,6 +190,16 @@ jobs:
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: warn
           retention-days: 14
+      - name: Report build failure
+        if: failure()
+        run: |
+          [ -f build.log ] || { echo "::error::build.log was not created"; exit 0; }
+          { grep -n -i -E "error|fail|cannot|not found|unresolved|what went wrong" build.log | tail -8 || true
+            echo "--- last lines ---"
+            tail -n 8 build.log
+          } | cut -c1-400 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
