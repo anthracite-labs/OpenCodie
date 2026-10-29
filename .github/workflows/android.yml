@@ -1,246 +1,192 @@
 name: android
-
-# Builds the APK: OpenCode (Android/Bionic) -> Termux runtime -> Gradle.
-# The app needs the Android SDK, NDK, Rust and Bun, so the APK is assembled here.
 on:
-  workflow_dispatch:
   pull_request:
-
+  workflow_dispatch:
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${ github.ref }
   cancel-in-progress: true
-
 permissions:
   contents: read
-  pull-requests: write
-  checks: write
-
-env:
-  PR_NUMBER: ${{ github.event.pull_request.number }}
-  ANDROID_NDK_VERSION: r28b
-  ANDROID_NDK_HOME: /opt/android-ndk
-  ANDROID_API: "29"
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  apk:
+  runtime:
+    name: Prepare reusable OpenCode + Termux runtime
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Restore last verified native runtime
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/src/main/assets/runtime-aarch64.zip
+            app/src/main/assets/runtime.sha256
+            app/src/main/assets/runtime.version
+          key: runtime-v1-${ runner.os }-${ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }
+      - name: Install native build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zip unzip xz-utils binutils curl
+          rustup target add aarch64-linux-android
+          curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
+          export PATH="$HOME/.bun/bin:$PATH"
+          test "$(bun --version)" = 1.4.4
+          wget -q https://dl.google.com/android/repository/android-ndk-r28b-linux.zip -O /tmp/ndk.zip
+          sudo unzip -q /tmp/ndk.zip -d /opt
+          sudo mv /opt/android-ndk-r28b /opt/android-ndk
+          rm /tmp/ndk.zip
+      - name: Build native runtime
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          ANDROID_NDK_HOME: /opt/android-ndk
+          ANDROID_API: "29"
+          GH_TOKEN: ${ github.token }
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          bash scripts/build-opencode.sh 2>&1 | tee native.log
+          bash scripts/build-runtime.sh 2>&1 | tee -a native.log
+      - name: Verify cached or newly-built runtime
+        run: |
+          set -euo pipefail
+          ASSETS=app/src/main/assets
+          test -s "$ASSETS/runtime-aarch64.zip"
+          test -s "$ASSETS/runtime.sha256"
+          test -s "$ASSETS/runtime.version"
+          printf '%s  %s\n' "$(cat "$ASSETS/runtime.sha256")" "$ASSETS/runtime-aarch64.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
+              required={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/rg","var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
+              missing=required-set(z.namelist())
+              assert not missing, f"Runtime missing: {sorted(missing)}"
+              assert z.testzip() is None, "Corrupt runtime archive"
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-runtime
+          path: app/src/main/assets/runtime*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload native diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-failure-log
+          path: native.log
+          if-no-files-found: ignore
 
+  apk:
+    name: Assemble and verify APK
+    needs: runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Free runner disk
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /opt/microsoft
-          sudo docker image prune --all --force 2>/dev/null || true
-          df -h /
-
-      - name: Install Android SDK
+      - name: Select installed Android SDK
         run: |
           set -euo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          # Use the SDK preinstalled on the runner image instead of a setup action.
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_HOME=$SDK" >>"$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >>"$GITHUB_ENV"
-          echo "$SDK/cmdline-tools/latest/bin" >>"$GITHUB_PATH"
-          echo "$SDK/platform-tools" >>"$GITHUB_PATH"
-          export PATH="$SDK/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --version || true
-          sdkmanager --licenses </dev/null >/dev/null || true
-          echo "available platforms:"
-          sdkmanager --list 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -8
-          # Highest platform we can install; the pinned one when it exists.
-          TARGET="platforms;android-37"
-          sdkmanager --install "$TARGET" "platform-tools" || sdkmanager --install "$TARGET" --channel=3 || true
-          INSTALLED=$(sdkmanager --list_installed 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -1)
-          if [ -z "$INSTALLED" ]; then
-            FALLBACK=$(sdkmanager --list 2>/dev/null | grep -oE "platforms;android-[0-9]+" | sort -uV | tail -1)
-            sdkmanager --install "$FALLBACK" "platform-tools"
-            INSTALLED=$FALLBACK
-          fi
-          echo "OPENCODIE_COMPILE_SDK=${INSTALLED##*-}" >>"$GITHUB_ENV"
-          echo "using $INSTALLED"
-          sdkmanager --list_installed 2>/dev/null | grep -E "platforms|build-tools" | head -10
-
-      - name: Install Android NDK ${{ env.ANDROID_NDK_VERSION }}
-        run: |
-          exec > >(tee -a ci.log) 2>&1
-          wget -q "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" -O /tmp/ndk.zip
-          sudo mkdir -p /opt
-          sudo unzip -q /tmp/ndk.zip -d /opt
-          sudo mv "/opt/android-ndk-${ANDROID_NDK_VERSION}" "$ANDROID_NDK_HOME"
-          rm -f /tmp/ndk.zip
-
-      - name: Install build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zip unzip xz-utils binutils curl
-
-      - name: Install Rust Android target
-        run: |
-          rustup target add aarch64-linux-android
-          rustc --version
-
-      - name: Install Bun 1.4.4
-        run: |
-          exec > >(tee -a ci.log) 2>&1
-          curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
-          echo "$HOME/.bun/bin" >>"$GITHUB_PATH"
-          export PATH="$HOME/.bun/bin:$PATH"
-          test "$(bun --version)" = "1.4.4"
-
-      - name: Prepare signing key
+          test -d "$ANDROID_HOME/platforms"
+          PLATFORM=$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-[0-9]*' | sed 's@.*/android-@@' | sort -n | tail -1)
+          test -n "$PLATFORM" && test -s "$ANDROID_HOME/platforms/android-$PLATFORM/android.jar"
+          echo "OPENCODIE_COMPILE_SDK=$PLATFORM" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-runtime
+          path: app/src/main/assets
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Configure signing key
         env:
-          KEYSTORE_BASE64: ${{ secrets.OPENCODIE_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
+          STORE_BASE64: ${ secrets.OPENCODIE_KEYSTORE_BASE64 }
+          STORE_PASSWORD: ${ secrets.OPENCODIE_KEYSTORE_PASSWORD }
+          KEY_ALIAS: ${ secrets.OPENCODIE_KEY_ALIAS }
+          KEY_PASSWORD: ${ secrets.OPENCODIE_KEY_PASSWORD }
         run: |
           set -euo pipefail
-          if [ -n "${KEYSTORE_BASE64:-}" ]; then
-            echo "using repository signing keystore"
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/opencodie.jks"
-            echo "OPENCODIE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >>"$GITHUB_ENV"
-            echo "OPENCODIE_KEY_ALIAS=$KEY_ALIAS" >>"$GITHUB_ENV"
-            echo "OPENCODIE_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" >>"$GITHUB_ENV"
+          FILE="$RUNNER_TEMP/opencodie.jks"
+          if [ -n "$STORE_BASE64" ]; then
+            printf %s "$STORE_BASE64" | base64 -d > "$FILE"
+            test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS"
+            KEY_PASSWORD="${KEY_PASSWORD:-$STORE_PASSWORD}"
           else
-            # No repository keystore: sign with a throwaway one so the artifact is
-            # installable. A stable identity for updates needs the secrets above.
-            echo "no keystore secret, generating an ephemeral signing key"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/opencodie.jks" -storetype PKCS12 \
-              -storepass opencodie -keypass opencodie -alias opencodie \
-              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenCodie"
-            echo "OPENCODIE_KEYSTORE_PASSWORD=opencodie" >>"$GITHUB_ENV"
-            echo "OPENCODIE_KEY_ALIAS=opencodie" >>"$GITHUB_ENV"
-            echo "OPENCODIE_KEY_PASSWORD=opencodie" >>"$GITHUB_ENV"
+            echo "::warning::Temporary signing key; use secrets for upgradeable APKs."
+            STORE_PASSWORD=opencodie
+            KEY_ALIAS=opencodie
+            KEY_PASSWORD=opencodie
+            keytool -genkeypair -keystore "$FILE" -storetype PKCS12 -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenCodie"
           fi
-          echo "OPENCODIE_KEYSTORE_FILE=$RUNNER_TEMP/opencodie.jks" >>"$GITHUB_ENV"
-
-      - name: Build APK
+          echo "OPENCODIE_KEYSTORE_FILE=$FILE" >> "$GITHUB_ENV"
+          echo "OPENCODIE_KEYSTORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "OPENCODIE_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "OPENCODIE_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Assemble release and debug APKs
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          OPENCODIE_VERSION_CODE: ${{ github.run_number }}
+          OPENCODIE_VERSION_CODE: ${ github.run_number }
         run: |
-          set -o pipefail
-          bash scripts/build-release.sh 2>&1 | tee build.log
-          ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
-
-      - name: Verify APK
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease :app:assembleDebug 2>&1 | tee build.log
+      - name: Verify signed APK and bundled files
         run: |
-          set -uo pipefail
-          exec > >(tee -a ci.log) 2>&1
-          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          test -f "$APK" || { echo "no release APK"; exit 1; }
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          {
-            echo "APK: $APK"
-            echo "size: $(du -h "$APK" | cut -f1)"
-            echo "sha256: $(sha256sum "$APK" | cut -d' ' -f1)"
-            echo
-            echo "--- badging"
-            "$BT/aapt2" dump badging "$APK" | grep -E "^package:|^sdkVersion|^targetSdkVersion|^application-label:"
-            echo
-            echo "--- signature"
-            "$BT/apksigner" verify --print-certs "$APK" | head -4
-          } >"$RUNNER_TEMP/apk.txt" 2>&1
-
-          # The ARM64 payload lives inside the embedded Termux runtime, not in lib/.
-          unzip -p "$APK" assets/runtime-aarch64.zip >"$RUNNER_TEMP/runtime.zip"
-          unzip -p "$RUNNER_TEMP/runtime.zip" libexec/opencode/opencode.bin >"$RUNNER_TEMP/opencode.bin"
-          {
-            echo
-            echo "--- embedded runtime"
-            unzip -l "$RUNNER_TEMP/runtime.zip" | grep -E "bin/(pkg|apt|dpkg|bash|rg)|lib/libc\+\+_shared.so|libexec/opencode/|SYMLINKS.txt|var/lib/dpkg/status" | head -12
-            echo
-            echo "--- opencode binary"
-            readelf -h "$RUNNER_TEMP/opencode.bin" | grep -E "Machine|Type"
-            readelf -d "$RUNNER_TEMP/opencode.bin" | grep NEEDED | head -5
-            echo "(the binary cannot run on the x86_64 runner: $(file -b "$RUNNER_TEMP/opencode.bin"))"
-          } >>"$RUNNER_TEMP/apk.txt" 2>&1
-
-          cat "$RUNNER_TEMP/apk.txt"
-          STATUS=0
-          grep -q "package: name='com.termux'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL package id"; STATUS=1; }
-          grep -q "targetSdkVersion:'28'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL targetSdk"; STATUS=1; }
-          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/apk.txt" || { echo "FAIL minSdk"; STATUS=1; }
-          grep -q "Machine:.*AArch64" "$RUNNER_TEMP/apk.txt" || { echo "FAIL opencode is not aarch64"; STATUS=1; }
-          grep -q "libc.so.6" "$RUNNER_TEMP/apk.txt" && { echo "FAIL opencode links glibc"; STATUS=1; }
-          for f in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so SYMLINKS.txt var/lib/dpkg/status; do
-            unzip -l "$RUNNER_TEMP/runtime.zip" | grep -q " $f\$" || { echo "FAIL runtime missing $f"; STATUS=1; }
-          done
-          exit $STATUS
-
-      - name: Report APKs
-        if: always()
-        run: |
-          find app/build/outputs/apk -name '*.apk' -exec ls -lh {} \; || true
-
-      - name: Upload APK
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          test -x "$BT/aapt2" && test -x "$BT/apksigner"
+          "$BT/apksigner" verify --print-certs "$APK" | tee verification.log
+          "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
+          "$BT/aapt2" dump xmltree "$APK" AndroidManifest.xml > "$RUNNER_TEMP/manifest.txt"
+          python3 - "$RUNNER_TEMP/manifest.txt" <<'PY'
+          import re,sys
+          data=open(sys.argv[1]).read()
+          for label,expected in (("minSdkVersion",29),("targetSdkVersion",28)):
+              m=re.search(r"android:"+label+r"\b[^\n]*\(type 0x10\)0x([0-9a-fA-F]+)",data)
+              if not m: raise SystemExit(f"Manifest missing {label}")
+              if int(m.group(1),16)!=expected: raise SystemExit(f"Wrong {label}: {int(m.group(1),16)} != {expected}")
+          print("Verified minSdk 29 / targetSdk 28")
+          PY
+          unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
+          unzip -p "$APK" assets/runtime.sha256 > "$RUNNER_TEMP/runtime.sha256"
+          printf '%s  %s\n' "$(cat "$RUNNER_TEMP/runtime.sha256")" "$RUNNER_TEMP/runtime.zip" | sha256sum -c -
+          python3 - "$RUNNER_TEMP/runtime.zip" "$RUNNER_TEMP/opencode.bin" <<'PY'
+          import sys,zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/rg","var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
+              missing=required-set(z.namelist())
+              if missing: raise SystemExit(f"Missing runtime files: {sorted(missing)}")
+              with open(sys.argv[2],"wb") as out: out.write(z.read("libexec/opencode/opencode.bin"))
+          PY
+          readelf -h "$RUNNER_TEMP/opencode.bin" | tee -a verification.log
+          readelf -h "$RUNNER_TEMP/opencode.bin" | grep -q 'Machine:.*AArch64'
+          if readelf -d "$RUNNER_TEMP/opencode.bin" | grep -E 'NEEDED.*(libc\.so\.6|ld-musl|libc\.musl)'; then
+            echo "::error::Non-Android libc linked"; exit 1
+          fi
+          sha256sum "$APK" | tee -a verification.log
+      - name: Upload APKs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: opencodie-apk
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: warn
-
-      - name: Upload build log
+          retention-days: 14
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: opencodie-build-log
           path: |
             build.log
-            app/build/outputs/logs/*
-          if-no-files-found: warn
-
-      - name: Report APK facts
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          [ -n "${PR_NUMBER:-}" ] || exit 0
-          [ -f "$RUNNER_TEMP/apk.txt" ] || exit 0
-          {
-            echo "APK built for $GITHUB_SHA (verification failed, see build log)."
-            echo
-            echo '```'
-            cat "$RUNNER_TEMP/apk.txt"
-            echo '```'
-          } >"$RUNNER_TEMP/facts.md"
-          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/facts.md" || true
-
-      # Artifacts live in blob storage that not every client can read; failures
-      # are also surfaced where the API exposes them.
-      - name: Report failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo "Android build failed for $GITHUB_SHA."
-            echo
-            for f in ci.log build.log; do
-              [ -f "$f" ] || continue
-              echo "<details><summary>$f (last 150 lines)</summary>"
-              echo
-              echo '```'
-              tail -n 150 "$f"
-              echo '```'
-              echo "</details>"
-            done
-          } >"$RUNNER_TEMP/comment.md"
-          if [ -f "$RUNNER_TEMP/apk.txt" ]; then
-            { echo; echo "\`\`\`"; cat "$RUNNER_TEMP/apk.txt"; echo "\`\`\`"; } >>"$RUNNER_TEMP/comment.md"
-          fi
-          grep -i -m 5 "error:\|FAIL " ci.log build.log 2>/dev/null | sed 's/^/::error::/' || true
-          if [ -n "${PR_NUMBER:-}" ]; then
-            gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md" || true
-          fi
+            verification.log
+            app/build/outputs/logs/
+          if-no-files-found: ignore
