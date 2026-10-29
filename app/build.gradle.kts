@@ -23,6 +23,13 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    lint {
+        // targetSdk 28 is required so Android keeps allowing exec() from the
+        // app's private data directory (Termux). The Play-store target-API
+        // check does not apply to a sideloaded APK.
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     androidResources { noCompress += "zip" }
 
     // Signing credentials come from the environment; never commit a keystore.
