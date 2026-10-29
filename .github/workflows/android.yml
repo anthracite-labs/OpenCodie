@@ -136,6 +136,7 @@ jobs:
       - name: Verify APK
         run: |
           set -uo pipefail
+          exec > >(tee -a ci.log) 2>&1
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
           test -f "$APK" || { echo "no release APK"; exit 1; }
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
@@ -206,8 +207,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           [ -n "${PR_NUMBER:-}" ] || exit 0
+          [ -f "$RUNNER_TEMP/apk.txt" ] || exit 0
           {
-            echo "APK built and verified for $GITHUB_SHA."
+            echo "APK built for $GITHUB_SHA (verification failed, see build log)."
             echo
             echo '```'
             cat "$RUNNER_TEMP/apk.txt"
@@ -235,7 +237,10 @@ jobs:
               echo "</details>"
             done
           } >"$RUNNER_TEMP/comment.md"
-          grep -i -m 5 "error:" ci.log build.log 2>/dev/null | sed 's/^/::error::/' || true
+          if [ -f "$RUNNER_TEMP/apk.txt" ]; then
+            { echo; echo "\`\`\`"; cat "$RUNNER_TEMP/apk.txt"; echo "\`\`\`"; } >>"$RUNNER_TEMP/comment.md"
+          fi
+          grep -i -m 5 "error:\|FAIL " ci.log build.log 2>/dev/null | sed 's/^/::error::/' || true
           if [ -n "${PR_NUMBER:-}" ]; then
             gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md" || true
           fi
