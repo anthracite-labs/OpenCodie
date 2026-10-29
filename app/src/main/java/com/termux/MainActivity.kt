@@ -47,6 +47,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.WHITE)
+            setOnClickListener {
+                if (OpenCodeHost.error != null) {
+                    text = getString(R.string.starting)
+                    OpenCodeHost.start(applicationContext)
+                }
+            }
         }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -207,7 +213,7 @@ class MainActivity : Activity() {
                 }
                 error != null -> {
                     status.visibility = View.VISIBLE
-                    status.text = getString(R.string.failed, error)
+                    status.text = getString(R.string.failed, error) + "\n\n" + getString(R.string.tap_to_retry)
                 }
                 else -> {
                     status.visibility = View.VISIBLE
