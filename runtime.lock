@@ -15,6 +15,7 @@ OPENTUI_VERSION=0.7.0
 PTY_VERSION=0.3.3
 PARCEL_WATCHER_VERSION=2.5.1
 BUN_PTY_VERSION=0.4.11
+BUN_PTY_COMMIT=a582ae17cc6c41cb890b142c48669936541339c7
 
 # Termux bootstrap, generated from termux-packages at this tag/commit.
 TERMUX_BOOTSTRAP_TAG=bootstrap-2026.10.25-r1+apt.android-7
