@@ -25,7 +25,7 @@ WebUI embedded), `scripts/build-runtime.sh` (Termux bootstrap + OpenCode,
 packaged as `runtime-aarch64.zip` and embedded in the APK),
 `scripts/build-release.sh` (both, then `./gradlew --no-daemon :app:assembleRelease`).
 
-CI: the **android** workflow runs on every pull request and on manual dispatch,
+CI: the **android** workflow runs on pull requests, pushes to `main`, and manual dispatch,
 builds the whole pipeline, verifies the APK (package id, SDK levels, ABI,
 embedded runtime, signature) and uploads `opencodie-apk` plus
 `opencodie-build-log`.
@@ -37,9 +37,13 @@ embedded runtime, signature) and uploads `opencodie-apk` plus
   identity and allows executing binaries from the app's private data directory.
   It cannot coexist with another app signed with a different key under the same
   package name; uninstall an existing `com.termux` app first.
-- First launch extracts the bundled runtime (no network). Later launches reuse it.
-  An APK upgrade replaces only the OpenCode executables and keeps packages,
-  projects, configuration and sessions.
+- First launch extracts the bundled runtime (no network). An app-owned
+  completion marker is created **after** the Termux second stage succeeds;
+  interrupted fresh installations retry from clean bundled files. An APK upgrade
+  replaces only the OpenCode executables and keeps packages, projects,
+  configuration and sessions. Unknown existing prefixes without the new
+  completion marker are **preserved and rejected**, never silently deleted.
+  Back up any installation created by an older pre-marker build before upgrading.
 
 ## Signing
 
