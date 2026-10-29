@@ -30,7 +30,6 @@ object RuntimeInstaller {
     private val APK_OWNED = listOf("bin/opencode", "libexec/opencode/")
 
     private const val EXEC_MODE = 448 // 0700
-    private const val FILE_MODE = 384 // 0600
 
     fun installIfNeeded(context: Context, log: (String) -> Unit) {
         val files = context.filesDir
@@ -89,25 +88,46 @@ object RuntimeInstaller {
         }
     }
 
-    /** Replaces the APK-owned OpenCode files without touching packages or user data. */
+    /** Stages the new executable and switches it without modifying installed packages. */
     private fun upgrade(context: Context, prefix: File, log: (String) -> Unit) {
         verifyChecksum(context)
         val staging = File(prefix.parentFile, "opencode-staging")
+        val active = File(prefix, "libexec/opencode")
+        val backup = File(prefix.parentFile, "opencode-backup")
+        val launcher = File(prefix, "bin/opencode")
+
+        // Recover the previous binary if power was lost between the two renames.
+        if (backup.exists() && !active.exists()) {
+            check(backup.renameTo(active)) { "Could not restore previous OpenCode binary" }
+        }
+        if (backup.exists()) backup.deleteRecursively()
         staging.deleteRecursively()
         try {
             extract(context, staging) { name -> APK_OWNED.any { name.startsWith(it) } }
-            val staged = staging.walkTopDown().filter { it.isFile }.toList()
-            check(staged.isNotEmpty()) { "Runtime archive has no OpenCode files" }
-            for (file in staged) {
-                val relative = file.relativeTo(staging).path
-                val target = File(prefix, relative)
-                target.parentFile?.mkdirs()
-                val incoming = File(target.parentFile, "${target.name}.incoming")
-                incoming.delete()
-                file.copyTo(incoming, overwrite = true)
-                Os.chmod(incoming.path, if (relative.startsWith("bin/") || relative.startsWith("libexec/")) EXEC_MODE else FILE_MODE)
-                check(incoming.renameTo(target)) { "Could not replace $relative" }
+            val incoming = File(staging, "libexec/opencode")
+            val stagedLauncher = File(staging, "bin/opencode")
+            val stagedBinary = File(incoming, "opencode.bin")
+            check(stagedBinary.isFile && stagedLauncher.isFile) {
+                "Bundled runtime is missing OpenCode executable or launcher"
             }
+            Os.chmod(stagedBinary.path, EXEC_MODE)
+            Os.chmod(stagedLauncher.path, EXEC_MODE)
+
+            // Move the entire versioned executable directory rather than mixing
+            // old and new native files. Keep the previous directory for rollback.
+            check(!active.exists() || active.renameTo(backup)) { "Could not back up OpenCode" }
+            try {
+                check(incoming.renameTo(active)) { "Could not activate new OpenCode" }
+                val replacement = File(launcher.parentFile, "${launcher.name}.incoming")
+                stagedLauncher.copyTo(replacement, overwrite = true)
+                Os.chmod(replacement.path, EXEC_MODE)
+                check(replacement.renameTo(launcher)) { "Could not replace OpenCode launcher" }
+            } catch (e: Exception) {
+                active.deleteRecursively()
+                if (backup.exists()) check(backup.renameTo(active)) { "OpenCode rollback failed" }
+                throw e
+            }
+            backup.deleteRecursively()
             log("OpenCode files replaced")
         } finally {
             staging.deleteRecursively()
@@ -189,7 +209,8 @@ object RuntimeInstaller {
      */
     private fun runSecondStage(prefix: File, log: (String) -> Unit) {
         val script = File(prefix, "etc").walkTopDown()
-            .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" } ?: return
+            .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" }
+            ?: error("Bundled Termux bootstrap second-stage script is missing")
         if (File(script.parentFile, "${script.name}.lock").exists()) return
         log("Configuring Termux packages")
         val process = ProcessBuilder("${prefix.path}/bin/bash", script.path)
