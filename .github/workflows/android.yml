@@ -190,16 +190,11 @@ jobs:
           "$BT/apksigner" verify --print-certs "$APK" | tee verification.log
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
-          "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > "$RUNNER_TEMP/manifest.txt"
-          python3 - "$RUNNER_TEMP/manifest.txt" <<'PY'
-          import re,sys
-          data=open(sys.argv[1]).read()
-          for label,expected in (("minSdkVersion",29),("targetSdkVersion",28)):
-              m=re.search(r"android:"+label+r"\b[^\n]*\(type 0x10\)0x([0-9a-fA-F]+)",data)
-              if not m: raise SystemExit(f"Manifest missing {label}")
-              if int(m.group(1),16)!=expected: raise SystemExit(f"Wrong {label}: {int(m.group(1),16)} != {expected}")
-          print("Verified minSdk 29 / targetSdk 28")
-          PY
+          # AAPT2 renamed sdkVersion -> minSdkVersion; accept either label
+          # rather than hand-parsing the compiled XML tree representation.
+          grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
+          grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
+          echo "Verified minSdk 29 / targetSdk 28"
           unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
           unzip -p "$APK" assets/runtime.sha256 > "$RUNNER_TEMP/runtime.sha256"
           printf '%s  %s\n' "$(cat "$RUNNER_TEMP/runtime.sha256")" "$RUNNER_TEMP/runtime.zip" | sha256sum -c -
