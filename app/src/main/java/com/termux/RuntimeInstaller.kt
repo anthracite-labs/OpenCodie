@@ -186,6 +186,9 @@ object RuntimeInstaller {
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     val name = entry.name
+                    // All extraction and symlink destinations must stay inside staging.
+                    // A valid checksum alone does not make ZIP paths safe.
+                    if (name != "SYMLINKS.txt") safePath(destination, name)
                     if (name == "SYMLINKS.txt") {
                         val text = ByteArrayOutputStream()
                         while (true) {
@@ -196,10 +199,10 @@ object RuntimeInstaller {
                         for (line in text.toString("UTF-8").lines().filter { it.isNotBlank() }) {
                             val parts = line.split('←')
                             check(parts.size == 2) { "Malformed symlink line: $line" }
-                            symlinks += parts[0] to File(destination, parts[1].removePrefix("./")).path
+                            symlinks += parts[0] to safePath(destination, parts[1].removePrefix("./")).path
                         }
                     } else if (keep(name)) {
-                        val target = File(destination, name)
+                        val target = safePath(destination, name)
                         if (entry.isDirectory) {
                             target.mkdirs()
                         } else {
@@ -223,6 +226,18 @@ object RuntimeInstaller {
             }
         }
         return symlinks
+    }
+
+    private fun safePath(root: File, name: String): File {
+        check(!name.startsWith("/") && name.split('/').none { it == ".." }) {
+            "Unsafe runtime archive path: $name"
+        }
+        val canonicalRoot = root.canonicalFile
+        val result = File(root, name).canonicalFile
+        check(result == canonicalRoot || result.path.startsWith(canonicalRoot.path + File.separator)) {
+            "Runtime archive path leaves staging: $name"
+        }
+        return result
     }
 
     /** SHA-256 of the bundled archive against the checksum written at build time. */
