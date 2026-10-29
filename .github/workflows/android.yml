@@ -1,9 +1,14 @@
 name: android
 
-# Build fallback: the app needs the Android SDK, NDK, Rust and Bun, so the APK
-# is assembled here when they are unavailable locally.
+# Builds the APK: OpenCode (Android/Bionic) -> Termux runtime -> Gradle.
+# The app needs the Android SDK, NDK, Rust and Bun, so the APK is assembled here.
 on:
   workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -25,12 +30,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Free runner disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /opt/microsoft
+          sudo docker image prune --all --force 2>/dev/null || true
+          df -h /
+
       - uses: android-actions/setup-android@v3
 
-      - name: Install SDK packages
+      - name: Install Android SDK
         run: |
-          sdkmanager --licenses >/dev/null
+          sdkmanager --licenses >/dev/null || true
           sdkmanager --install "platforms;android-37" "platform-tools"
+          sdkmanager --list_installed | head -20
 
       - name: Install Android NDK ${{ env.ANDROID_NDK_VERSION }}
         run: |
@@ -38,14 +52,17 @@ jobs:
           sudo mkdir -p /opt
           sudo unzip -q /tmp/ndk.zip -d /opt
           sudo mv "/opt/android-ndk-${ANDROID_NDK_VERSION}" "$ANDROID_NDK_HOME"
+          rm -f /tmp/ndk.zip
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip xz-utils binutils curl
 
       - name: Install Rust Android target
         run: |
           rustup target add aarch64-linux-android
           rustc --version
-
-      - name: Install host deps
-        run: sudo apt-get update && sudo apt-get install -y zip unzip xz-utils binutils
 
       - name: Install Bun 1.4.4
         run: |
@@ -54,25 +71,61 @@ jobs:
           export PATH="$HOME/.bun/bin:$PATH"
           test "$(bun --version)" = "1.4.4"
 
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.OPENCODIE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "using repository signing keystore"
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/opencodie.jks"
+            echo "OPENCODIE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >>"$GITHUB_ENV"
+            echo "OPENCODIE_KEY_ALIAS=$KEY_ALIAS" >>"$GITHUB_ENV"
+            echo "OPENCODIE_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" >>"$GITHUB_ENV"
+          else
+            # No repository keystore: sign with a throwaway one so the artifact is
+            # installable. A stable identity for updates needs the secrets above.
+            echo "no keystore secret, generating an ephemeral signing key"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/opencodie.jks" -storetype PKCS12 \
+              -storepass opencodie -keypass opencodie -alias opencodie \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=OpenCodie"
+            echo "OPENCODIE_KEYSTORE_PASSWORD=opencodie" >>"$GITHUB_ENV"
+            echo "OPENCODIE_KEY_ALIAS=opencodie" >>"$GITHUB_ENV"
+            echo "OPENCODIE_KEY_PASSWORD=opencodie" >>"$GITHUB_ENV"
+          fi
+          echo "OPENCODIE_KEYSTORE_FILE=$RUNNER_TEMP/opencodie.jks" >>"$GITHUB_ENV"
+
       - name: Build APK
         env:
           GH_TOKEN: ${{ github.token }}
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
-          OPENCODIE_KEYSTORE_FILE: ${{ secrets.OPENCODIE_KEYSTORE_FILE }}
-          OPENCODIE_KEYSTORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
-          OPENCODIE_KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
-          OPENCODIE_KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
         run: |
           set -o pipefail
           bash scripts/build-release.sh 2>&1 | tee build.log
           ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
 
-      - name: Upload artifacts
+      - name: Report APKs
+        if: always()
+        run: |
+          find app/build/outputs/apk -name '*.apk' -exec ls -lh {} \; || true
+
+      - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: opencodie-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencodie-build-log
           path: |
-            app/build/outputs/apk/**/*.apk
             build.log
+            app/build/outputs/logs/*
           if-no-files-found: warn

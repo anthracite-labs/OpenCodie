@@ -16,7 +16,6 @@ source "$REPO_ROOT/runtime.lock"
 WORK="${WORK:-$REPO_ROOT/work}"
 DIST="${DIST:-$REPO_ROOT/dist}"
 UPSTREAM="$WORK/opencode-$OPENCODE_VERSION"
-PARCEL_WATCHER_VERSION="${PARCEL_WATCHER_VERSION:-2.5.1}"
 export PATH="$HOME/.bun/bin:$PATH"
 
 command -v bun >/dev/null || { echo "bun is not installed (need $BUN_VERSION)" >&2; exit 1; }
@@ -25,11 +24,24 @@ test "$(bun --version)" = "$BUN_VERSION" || {
     exit 1
 }
 
-echo "==> upstream $OPENCODE_VERSION"
+# Pinned source revision: tags are never trusted on their own.
+checkout_pinned() {
+    local dir="$1" sha="$2"
+    if git -C "$dir" rev-parse HEAD 2>/dev/null | grep -q "^$sha"; then return 0; fi
+    git -C "$dir" fetch --depth 1 origin "$sha"
+    git -C "$dir" -c advice.detachedHead=false checkout --detach "$sha"
+    test "$(git -C "$dir" rev-parse HEAD)" = "$sha" || {
+        echo "wrong revision in $dir (expected $sha)" >&2
+        exit 1
+    }
+}
+
+echo "==> upstream $OPENCODE_VERSION @ $OPENCODE_COMMIT"
 if [ ! -d "$UPSTREAM/.git" ]; then
     mkdir -p "$WORK"
-    git clone --depth 1 --branch "$OPENCODE_VERSION" "$OPENCODE_REPO" "$UPSTREAM"
+    git clone --filter=blob:none --no-checkout "$OPENCODE_REPO" "$UPSTREAM"
 fi
+checkout_pinned "$UPSTREAM" "$OPENCODE_COMMIT"
 
 apply_patch() {
     if git -C "$UPSTREAM" apply --reverse --check "$REPO_ROOT/patches/$1" 2>/dev/null; then

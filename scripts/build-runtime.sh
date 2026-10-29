@@ -21,13 +21,21 @@ test -x "$DIST/opencode/opencode" && test -x "$DIST/opencode/opencode.bin" || {
     exit 1
 }
 
-echo "==> termux bootstrap $TERMUX_BOOTSTRAP_TAG"
+echo "==> termux bootstrap $TERMUX_BOOTSTRAP_TAG @ $TERMUX_BOOTSTRAP_COMMIT"
 if [ ! -f "$BOOTSTRAP" ]; then
     TERMUX="$WORK/termux-packages"
     if [ ! -d "$TERMUX/.git" ]; then
         mkdir -p "$WORK"
-        git clone --depth 1 --branch "$TERMUX_BOOTSTRAP_TAG" "$TERMUX_PACKAGES_REPO" "$TERMUX"
+        git clone --filter=blob:none --no-checkout "$TERMUX_PACKAGES_REPO" "$TERMUX"
     fi
+    if [ "$(git -C "$TERMUX" rev-parse HEAD 2>/dev/null || true)" != "$TERMUX_BOOTSTRAP_COMMIT" ]; then
+        git -C "$TERMUX" fetch --depth 1 origin "$TERMUX_BOOTSTRAP_COMMIT"
+        git -C "$TERMUX" -c advice.detachedHead=false checkout --detach "$TERMUX_BOOTSTRAP_COMMIT"
+    fi
+    test "$(git -C "$TERMUX" rev-parse HEAD)" = "$TERMUX_BOOTSTRAP_COMMIT" || {
+        echo "wrong termux-packages revision" >&2
+        exit 1
+    }
     (
         cd "$TERMUX"
         ./scripts/generate-bootstraps.sh \
@@ -51,7 +59,7 @@ echo "==> archive"
 rm -f "$ARCHIVE"
 (cd "$STAGE" && zip -r -9 -q "$ARCHIVE" ./*)
 
-for expected in bin/pkg bin/apt bin/dpkg bin/rg lib/libc++_shared.so etc/opencode-apk/version; do
+for expected in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
     unzip -l "$ARCHIVE" | grep -q " $expected\$" || {
         echo "runtime is missing $expected" >&2
         exit 1

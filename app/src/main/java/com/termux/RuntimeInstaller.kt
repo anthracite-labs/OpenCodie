@@ -10,12 +10,15 @@ import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 /**
- * First-launch provisioning of the Termux userspace bundled in the APK.
+ * Provisioning of the Termux userspace bundled in the APK.
  *
  * The archive layout is the Termux bootstrap layout: entries relative to
  * ${Termux.PREFIX} plus a SYMLINKS.txt of `target←link` lines, so extraction is
  * the same procedure TermuxInstaller performs after downloading a bootstrap —
  * except that the archive ships inside the APK and nothing is fetched.
+ *
+ * The installed-version marker is written last, so an interrupted first launch or
+ * a failed package configuration never looks like a completed installation.
  */
 object RuntimeInstaller {
     private const val ZIP = "runtime-aarch64.zip"
@@ -23,32 +26,36 @@ object RuntimeInstaller {
     private const val SHA256_ASSET = "runtime.sha256"
     private const val VERSION_FILE = "etc/opencode-apk/version"
 
-    /** APK-owned paths inside the prefix; an APK upgrade replaces only these. */
-    private val APK_OWNED = listOf("bin/opencode", "libexec/opencode/", "etc/opencode-apk/")
+    /** APK-owned binaries replaced on upgrade; everything else in the prefix is the user's. */
+    private val APK_OWNED = listOf("bin/opencode", "libexec/opencode/")
 
     private const val EXEC_MODE = 448 // 0700
+    private const val FILE_MODE = 384 // 0600
 
     fun installIfNeeded(context: Context, log: (String) -> Unit) {
         val files = context.filesDir
         val prefix = File(files, "usr")
+        val staging = File(files, "usr-staging")
+
+        // A leftover staging directory means a previous extraction was interrupted.
+        staging.deleteRecursively()
+
         val bundled = asset(context, VERSION_ASSET).trim()
         val installed = File(prefix, VERSION_FILE).takeIf { it.isFile }?.readText()?.trim()
 
         when {
             installed == null -> {
                 log("Installing bundled runtime $bundled")
-                verifyChecksum(context)
-                installBootstrap(context, files, prefix)
+                bootstrap(context, prefix, staging, log)
             }
             installed != bundled -> {
-                log("Updating OpenCode to $bundled")
-                extract(context, prefix) { name -> APK_OWNED.any { name.startsWith(it) } }
+                log("Updating OpenCode $installed -> $bundled")
+                upgrade(context, prefix, log)
             }
-            else -> log("Runtime $bundled already installed")
+            else -> log("Runtime $bundled ready")
         }
 
-        File(prefix, VERSION_FILE).apply { parentFile?.mkdirs() }.writeText("$bundled\n")
-        // home, tmp and cache are outside the bootstrap archive and must exist
+        // home, tmp and cache live outside the bootstrap archive and must exist
         // before anything runs (APT, dpkg and the shell all rely on them).
         File(Termux.HOME).mkdirs()
         File(prefix, "tmp").mkdirs()
@@ -56,17 +63,55 @@ object RuntimeInstaller {
 
         runSecondStage(prefix, log)
         writeOpenCodeConfig(log)
+
+        // Completion marker: only now is the runtime usable.
+        File(prefix, VERSION_FILE).apply { parentFile?.mkdirs() }.writeText("$bundled\n")
     }
 
-    /** Unpacks into a staging prefix, restores symlinks, then renames it into place. */
-    private fun installBootstrap(context: Context, files: File, prefix: File) {
-        val staging = File(files, "usr-staging")
+    /**
+     * Unpacks into a staging prefix, restores symlinks, then renames it into
+     * place. User data (home, cache) lives outside the prefix, so a failed
+     * first bootstrap is retried cleanly on the next launch.
+     */
+    private fun bootstrap(context: Context, prefix: File, staging: File, log: (String) -> Unit) {
+        verifyChecksum(context)
+        try {
+            val symlinks = extract(context, staging) { true }
+            check(symlinks.isNotEmpty()) { "Runtime archive has no SYMLINKS.txt" }
+            for ((target, link) in symlinks) Os.symlink(target, link)
+            prefix.deleteRecursively()
+            check(staging.renameTo(prefix)) { "Could not move the runtime into place" }
+            log("Runtime extracted")
+        } catch (e: Exception) {
+            staging.deleteRecursively()
+            prefix.deleteRecursively()
+            throw e
+        }
+    }
+
+    /** Replaces the APK-owned OpenCode files without touching packages or user data. */
+    private fun upgrade(context: Context, prefix: File, log: (String) -> Unit) {
+        verifyChecksum(context)
+        val staging = File(prefix.parentFile, "opencode-staging")
         staging.deleteRecursively()
-        val symlinks = extract(context, staging) { true }
-        check(symlinks.isNotEmpty()) { "Runtime archive has no SYMLINKS.txt" }
-        for ((target, link) in symlinks) Os.symlink(target, link)
-        prefix.deleteRecursively()
-        check(staging.renameTo(prefix)) { "Could not move staging prefix into place" }
+        try {
+            extract(context, staging) { name -> APK_OWNED.any { name.startsWith(it) } }
+            val staged = staging.walkTopDown().filter { it.isFile }.toList()
+            check(staged.isNotEmpty()) { "Runtime archive has no OpenCode files" }
+            for (file in staged) {
+                val relative = file.relativeTo(staging).path
+                val target = File(prefix, relative)
+                target.parentFile?.mkdirs()
+                val incoming = File(target.parentFile, "${target.name}.incoming")
+                incoming.delete()
+                file.copyTo(incoming, overwrite = true)
+                Os.chmod(incoming.path, if (relative.startsWith("bin/") || relative.startsWith("libexec/")) EXEC_MODE else FILE_MODE)
+                check(incoming.renameTo(target)) { "Could not replace $relative" }
+            }
+            log("OpenCode files replaced")
+        } finally {
+            staging.deleteRecursively()
+        }
     }
 
     /**
@@ -137,16 +182,18 @@ object RuntimeInstaller {
     }
 
     /**
-     * Runs Termux's bootstrap second stage (the postinst maintainer scripts that
-     * manual extraction skips). It is guarded by its own lock symlink and is a
-     * one-time operation for the lifetime of the prefix.
+     * Runs Termux's bootstrap second stage: the postinst maintainer scripts that
+     * manual extraction skips. It is guarded by its own lock symlink and is a
+     * one-time operation for the lifetime of the prefix, so a retry after a
+     * completed run is a no-op.
      */
     private fun runSecondStage(prefix: File, log: (String) -> Unit) {
         val script = File(prefix, "etc").walkTopDown()
             .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" } ?: return
         if (File(script.parentFile, "${script.name}.lock").exists()) return
-        log("Finishing Termux package configuration")
+        log("Configuring Termux packages")
         val process = ProcessBuilder("${prefix.path}/bin/bash", script.path)
+            .directory(File(Termux.HOME))
             .redirectErrorStream(true)
             .apply {
                 environment().apply {
@@ -155,8 +202,14 @@ object RuntimeInstaller {
                 }
             }
             .start()
-        process.inputStream.bufferedReader().forEachLine { log(it) }
-        check(process.waitFor() == 0) { "Termux bootstrap second stage failed" }
+        val tail = StringBuilder()
+        process.inputStream.bufferedReader().forEachLine { line ->
+            log(line)
+            tail.append(line).append('\n')
+            if (tail.length > 2_000) tail.delete(0, tail.length - 2_000)
+        }
+        val code = process.waitFor()
+        check(code == 0) { "Termux bootstrap second stage failed (exit $code)\n$tail" }
     }
 
     /** Initial OpenCode configuration; later user edits are preserved. */

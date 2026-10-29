@@ -13,6 +13,7 @@ BUN_COMPILE_RELEASE=bun-v1.4.4
 # @opentui/core (catalog version of OpenCode v2.2.2) and the PTY natives it embeds.
 OPENTUI_VERSION=0.7.0
 PTY_VERSION=0.3.3
+PARCEL_WATCHER_VERSION=2.5.1
 BUN_PTY_VERSION=0.4.11
 
 # Termux bootstrap, generated from termux-packages at this tag/commit.

@@ -16,10 +16,15 @@ class OpenCodeService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, notification())
-        Thread { OpenCodeHost.prepare(this) }.apply { isDaemon = true }.start()
+        OpenCodeHost.start(this)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // START_STICKY re-delivers a null intent after a process kill; the
+        // supervisor is idempotent, so this never starts a second server.
+        OpenCodeHost.start(this)
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
