@@ -133,6 +133,30 @@ jobs:
           bash scripts/build-release.sh 2>&1 | tee build.log
           ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
 
+      - name: Verify APK
+        run: |
+          set -euo pipefail
+          exec > >(tee -a ci.log) 2>&1
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          test -f "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/aapt2" dump badging "$APK" | grep -E "^package:|^sdkVersion|^targetSdkVersion|^native-code|^application-label" | tee "$RUNNER_TEMP/badging.txt"
+          grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
+          grep -q "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
+          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/badging.txt"
+          grep -q "native-code: 'arm64-v8a'" "$RUNNER_TEMP/badging.txt"
+          unzip -l "$APK" | grep -q "assets/runtime-aarch64.zip"
+          RUNTIME=$(unzip -l "$APK" | awk '/assets\/runtime-aarch64.zip/{print $1}')
+          test "$RUNTIME" -gt 30000000
+          "$BT/apksigner" verify --print-certs "$APK" | head -3 | tee "$RUNNER_TEMP/signature.txt"
+          {
+            echo "APK: $APK"
+            echo "size: $(du -h "$APK" | cut -f1)"
+            echo "sha256: $(sha256sum "$APK" | cut -d' ' -f1)"
+            echo "bundled runtime asset: $RUNTIME bytes"
+            cat "$RUNNER_TEMP/badging.txt"
+          } | tee "$RUNNER_TEMP/apk.txt"
+
       - name: Report APKs
         if: always()
         run: |
@@ -155,6 +179,21 @@ jobs:
             build.log
             app/build/outputs/logs/*
           if-no-files-found: warn
+
+      - name: Report APK facts
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -n "${PR_NUMBER:-}" ] || exit 0
+          {
+            echo "APK built and verified for $GITHUB_SHA."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/apk.txt"
+            echo '```'
+          } >"$RUNNER_TEMP/facts.md"
+          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/facts.md" || true
 
       # Artifacts live in blob storage that not every client can read; failures
       # are also surfaced where the API exposes them.
