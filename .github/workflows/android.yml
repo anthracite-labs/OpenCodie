@@ -81,6 +81,16 @@ jobs:
           name: native-failure-log
           path: native.log
           if-no-files-found: ignore
+      - name: Report native failure
+        if: failure()
+        run: |
+          [ -f native.log ] || { echo "::error::native.log was not created"; exit 0; }
+          { grep -n -i -E "error|fail|cannot|no such|not found|denied" native.log | tail -6 || true
+            echo "--- last lines ---"
+            tail -n 6 native.log
+          } | cut -c1-400 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
 
   apk:
     name: Assemble and verify APK
