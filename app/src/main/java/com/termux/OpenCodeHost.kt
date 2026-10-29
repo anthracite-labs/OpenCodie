@@ -67,11 +67,12 @@ object OpenCodeHost {
 
         var backoff = 2_000L
         while (!stopping) {
+            var started: Process? = null
             try {
                 status = "Starting OpenCode"
                 error = null
                 pairingUrl = null
-                val started = launch(context)
+                started = launch(context)
                 process = started
                 status = "Waiting for OpenCode"
                 pairingUrl = awaitPairing(started)
@@ -82,13 +83,28 @@ object OpenCodeHost {
                 Log.w(TAG, "OpenCode exited with $code")
                 status = "OpenCode stopped (exit $code), restarting"
             } catch (e: Exception) {
-                if (stopping) break
-                fail("OpenCode stopped", e)
+                if (!stopping) fail("OpenCode stopped", e)
+            } finally {
+                // A failed readiness/pairing attempt must not leave a server
+                // holding the loopback port when the supervisor retries.
+                started?.let { child ->
+                    if (child.isAlive) {
+                        child.destroy()
+                        if (!child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                            child.destroyForcibly()
+                            child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+                        }
+                    }
+                }
+                process = null
+                pairingUrl = null
             }
-            process = null
-            pairingUrl = null
             if (stopping) break
-            Thread.sleep(backoff)
+            try {
+                Thread.sleep(backoff)
+            } catch (_: InterruptedException) {
+                if (stopping) break
+            }
             backoff = (backoff * 2).coerceAtMost(30_000L)
         }
         status = "Stopped"
