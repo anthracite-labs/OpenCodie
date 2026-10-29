@@ -12,6 +12,8 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
+  checks: write
 
 env:
   ANDROID_NDK_VERSION: r28b
@@ -38,11 +40,18 @@ jobs:
           sudo docker image prune --all --force 2>/dev/null || true
           df -h /
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK
         run: |
-          sdkmanager --licenses >/dev/null || true
+          set -euo pipefail
+          # Use the SDK preinstalled on the runner image instead of a setup action.
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >>"$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >>"$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >>"$GITHUB_PATH"
+          echo "$SDK/platform-tools" >>"$GITHUB_PATH"
+          export PATH="$SDK/cmdline-tools/latest/bin:$PATH"
+          sdkmanager --version
+          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --install "platforms;android-37" "platform-tools"
           sdkmanager --list_installed | head -20
 
@@ -101,6 +110,7 @@ jobs:
       - name: Build APK
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
         run: |
           set -o pipefail
@@ -129,3 +139,22 @@ jobs:
             build.log
             app/build/outputs/logs/*
           if-no-files-found: warn
+
+      # Artifacts live in blob storage that not every client can read; failures
+      # are also surfaced where the API exposes them.
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Android build failed."
+            echo
+            echo '```'
+            tail -n 120 build.log 2>/dev/null || echo "build.log was not produced"
+            echo '```'
+          } >"$RUNNER_TEMP/comment.md"
+          grep -n -i -m 20 "error\|FAILURE" build.log 2>/dev/null | sed 's/^/::error::/' || true
+          if [ -n "${PR_NUMBER:-}" ]; then
+            gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md" || true
+          fi
