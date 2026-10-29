@@ -127,10 +127,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Install pinned stable Android SDK
+      - name: Use pinned stable Android SDK
         run: |
           set -euo pipefail
-          sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+          if [ ! -s "$ANDROID_HOME/platforms/android-37/android.jar" ] ||
+             [ ! -x "$ANDROID_HOME/build-tools/36.0.0/aapt2" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            test -x "$SDKMANAGER" || { echo "::error::Android SDK manager not installed at $SDKMANAGER"; exit 1; }
+            "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install "platforms;android-37" "build-tools;36.0.0"
+          fi
           test -s "$ANDROID_HOME/platforms/android-37/android.jar"
           test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
           test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
