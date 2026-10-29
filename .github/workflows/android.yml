@@ -1,0 +1,78 @@
+name: android
+
+# Build fallback: the app needs the Android SDK, NDK, Rust and Bun, so the APK
+# is assembled here when they are unavailable locally.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_NDK_VERSION: r28b
+  ANDROID_NDK_HOME: /opt/android-ndk
+  ANDROID_API: "29"
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          sdkmanager --licenses >/dev/null
+          sdkmanager --install "platforms;android-37" "platform-tools"
+
+      - name: Install Android NDK ${{ env.ANDROID_NDK_VERSION }}
+        run: |
+          wget -q "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" -O /tmp/ndk.zip
+          sudo mkdir -p /opt
+          sudo unzip -q /tmp/ndk.zip -d /opt
+          sudo mv "/opt/android-ndk-${ANDROID_NDK_VERSION}" "$ANDROID_NDK_HOME"
+
+      - name: Install Rust Android target
+        run: |
+          rustup target add aarch64-linux-android
+          rustc --version
+
+      - name: Install host deps
+        run: sudo apt-get update && sudo apt-get install -y zip unzip xz-utils binutils
+
+      - name: Install Bun 1.4.4
+        run: |
+          curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
+          echo "$HOME/.bun/bin" >>"$GITHUB_PATH"
+          export PATH="$HOME/.bun/bin:$PATH"
+          test "$(bun --version)" = "1.4.4"
+
+      - name: Build APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENCODIE_VERSION_CODE: ${{ github.run_number }}
+          OPENCODIE_KEYSTORE_FILE: ${{ secrets.OPENCODIE_KEYSTORE_FILE }}
+          OPENCODIE_KEYSTORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
+          OPENCODIE_KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
+          OPENCODIE_KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          bash scripts/build-release.sh 2>&1 | tee build.log
+          ./gradlew --no-daemon :app:assembleDebug 2>&1 | tee -a build.log
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencodie-apk
+          path: |
+            app/build/outputs/apk/**/*.apk
+            build.log
+          if-no-files-found: warn

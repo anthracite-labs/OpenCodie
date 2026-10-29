@@ -1,0 +1,14 @@
+diff --git a/packages/core/src/filesystem/watcher.ts b/packages/core/src/filesystem/watcher.ts
+index ae359e3..967262b 100644
+--- a/packages/core/src/filesystem/watcher.ts
++++ b/packages/core/src/filesystem/watcher.ts
+@@ -25,6 +25,9 @@ function getBackend() {
+   if (process.platform === "win32") return "windows"
+   if (process.platform === "darwin") return "fs-events"
+   if (process.platform === "linux") return "inotify"
++  // Bun's Android runtime reports process.platform === "android"; Android
++  // kernels support inotify, which @parcel/watcher-android-arm64 uses.
++  if (process.platform === "android") return "inotify"
+ }
+ 
+ export const hasNativeBinding = () => !!watcher()

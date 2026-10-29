@@ -1,0 +1,29 @@
+# Pinned inputs for the OpenCodie build. Sourced by scripts/*.sh and CI.
+# Bump these deliberately; no floating tags are used anywhere in the build.
+
+# Upstream OpenCode v2 (WebUI + server + CLI), built with Bun 1.4.4.
+OPENCODE_VERSION=v2.2.2
+OPENCODE_COMMIT=098aa7fd6e02b03d6fc410f0b052038c7d4c5e81
+OPENCODE_REPO=https://github.com/anomalyco/opencode.git
+
+# Bun is fixed by the specification: 1.4.4 ships bun-linux-aarch64-android.zip.
+BUN_VERSION=1.4.4
+BUN_COMPILE_RELEASE=bun-v1.4.4
+
+# @opentui/core (catalog version of OpenCode v2.2.2) and the PTY natives it embeds.
+OPENTUI_VERSION=0.7.0
+PTY_VERSION=0.3.3
+BUN_PTY_VERSION=0.4.11
+
+# Termux bootstrap, generated from termux-packages at this tag/commit.
+TERMUX_BOOTSTRAP_TAG=bootstrap-2026.10.25-r1+apt.android-7
+TERMUX_BOOTSTRAP_COMMIT=4fd34c88f930defaed700fc5123536f5d9dce266
+TERMUX_PACKAGES_REPO=https://github.com/termux/termux-packages.git
+TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++
+
+# Android toolchain.
+ANDROID_COMPILE_SDK=37
+ANDROID_TARGET_SDK=28
+ANDROID_MIN_SDK=29
+ANDROID_NDK_VERSION=r28b
+ANDROID_API=29
