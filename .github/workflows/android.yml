@@ -16,6 +16,7 @@ permissions:
   checks: write
 
 env:
+  PR_NUMBER: ${{ github.event.pull_request.number }}
   ANDROID_NDK_VERSION: r28b
   ANDROID_NDK_HOME: /opt/android-ndk
   ANDROID_API: "29"
@@ -43,6 +44,7 @@ jobs:
       - name: Install Android SDK
         run: |
           set -euo pipefail
+          exec > >(tee -a ci.log) 2>&1
           # Use the SDK preinstalled on the runner image instead of a setup action.
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$SDK" >>"$GITHUB_ENV"
@@ -57,6 +59,7 @@ jobs:
 
       - name: Install Android NDK ${{ env.ANDROID_NDK_VERSION }}
         run: |
+          exec > >(tee -a ci.log) 2>&1
           wget -q "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" -O /tmp/ndk.zip
           sudo mkdir -p /opt
           sudo unzip -q /tmp/ndk.zip -d /opt
@@ -75,6 +78,7 @@ jobs:
 
       - name: Install Bun 1.4.4
         run: |
+          exec > >(tee -a ci.log) 2>&1
           curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
           echo "$HOME/.bun/bin" >>"$GITHUB_PATH"
           export PATH="$HOME/.bun/bin:$PATH"
@@ -148,13 +152,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "Android build failed."
+            echo "Android build failed for $GITHUB_SHA."
             echo
-            echo '```'
-            tail -n 120 build.log 2>/dev/null || echo "build.log was not produced"
-            echo '```'
+            for f in ci.log build.log; do
+              [ -f "$f" ] || continue
+              echo "<details><summary>$f (last 150 lines)</summary>"
+              echo
+              echo '```'
+              tail -n 150 "$f"
+              echo '```'
+              echo "</details>"
+            done
           } >"$RUNNER_TEMP/comment.md"
-          grep -n -i -m 20 "error\|FAILURE" build.log 2>/dev/null | sed 's/^/::error::/' || true
+          grep -i -m 5 "error:" ci.log build.log 2>/dev/null | sed 's/^/::error::/' || true
           if [ -n "${PR_NUMBER:-}" ]; then
             gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/comment.md" || true
           fi
