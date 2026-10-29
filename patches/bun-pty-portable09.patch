@@ -1,9 +1,9 @@
 diff --git a/rust-pty/Cargo.toml b/rust-pty/Cargo.toml
-index 0000000..0000000 100644
+index 83e146f..a45ab5a 100644
 --- a/rust-pty/Cargo.toml
 +++ b/rust-pty/Cargo.toml
 @@ -15,7 +15,9 @@ crate-type = ["cdylib"]
-
+ 
  [dependencies]
  # https://github.com/wezterm/wezterm/issues/6783
 -portable-pty = { version = "0.8.1", features = ["serde_support"] }
