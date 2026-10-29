@@ -1,0 +1,46 @@
+name: Provision APK signing key (one-time)
+on:
+  push:
+    branches: [ci/signing-build-release-20261030]
+    paths:
+      - .github/workflows/provision-signing.yml
+permissions:
+  contents: write
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate and encrypt release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .github/signing/encryption-recipient.pem
+          test ! -e .github/signing/release.p12.cms
+          test ! -e .github/signing/password.txt.cms
+          umask 077
+          pass="$(openssl rand -hex 32)"
+          keytool -genkeypair -storetype PKCS12 \
+            -keystore "$RUNNER_TEMP/release.p12" \
+            -storepass "$pass" -keypass "$pass" \
+            -alias opencodie -keyalg RSA -keysize 3072 \
+            -sigalg SHA256withRSA -validity 10000 \
+            -dname "CN=OpenCodie APK Release,O=OpenCodie"
+          keytool -exportcert -rfc -alias opencodie \
+            -keystore "$RUNNER_TEMP/release.p12" -storepass "$pass" \
+            > .github/signing/release-public.pem
+          printf '%s' "$pass" > "$RUNNER_TEMP/password.txt"
+          openssl cms -encrypt -binary -aes256 -outform DER \
+            -in "$RUNNER_TEMP/release.p12" \
+            -out .github/signing/release.p12.cms \
+            .github/signing/encryption-recipient.pem
+          openssl cms -encrypt -binary -aes256 -outform DER \
+            -in "$RUNNER_TEMP/password.txt" \
+            -out .github/signing/password.txt.cms \
+            .github/signing/encryption-recipient.pem
+          openssl x509 -in .github/signing/release-public.pem -noout -fingerprint -sha256
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/signing/release.p12.cms .github/signing/password.txt.cms .github/signing/release-public.pem
+          git commit -m 'chore(signing): escrow encrypted release key and public certificate [skip ci]'
+          git push origin HEAD:ci/signing-build-release-20261030
