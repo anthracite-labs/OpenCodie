@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      production:
+        description: Require persistent signing credentials for a production APK
+        type: boolean
+        default: false
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
@@ -141,6 +146,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.OPENCODIE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.OPENCODIE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.OPENCODIE_KEY_PASSWORD }}
+          PRODUCTION: ${{ inputs.production || false }}
         run: |
           set -euo pipefail
           FILE="$RUNNER_TEMP/opencodie.jks"
@@ -149,7 +155,11 @@ jobs:
             test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS"
             KEY_PASSWORD="${KEY_PASSWORD:-$STORE_PASSWORD}"
           else
-            echo "::warning::Temporary signing key; use secrets for upgradeable APKs."
+            if [ "$PRODUCTION" = "true" ]; then
+              echo "::error::Production APK requires OPENCODIE_KEYSTORE_BASE64 and stable signing secrets"
+              exit 1
+            fi
+            echo "::warning::Temporary CI signing key: APK is for testing only, not upgradeable across runs."
             STORE_PASSWORD=opencodie
             KEY_ALIAS=opencodie
             KEY_PASSWORD=opencodie
