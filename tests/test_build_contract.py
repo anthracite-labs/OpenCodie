@@ -16,7 +16,8 @@ class AndroidBuildContract(unittest.TestCase):
 
     def test_ci_installs_exact_sdk_instead_of_preview(self):
         workflow = (ROOT / ".github/workflows/android.yml").read_text()
-        self.assertIn('sdkmanager --install "platforms;android-37"', workflow)
+        self.assertIn('"$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install "platforms;android-37"', workflow)
+        self.assertIn('test -s "$ANDROID_HOME/platforms/android-37/android.jar"', workflow)
         self.assertIn('BT="$ANDROID_HOME/build-tools/36.0.0"', workflow)
         self.assertNotIn("sort -n | tail -1", workflow)
 
