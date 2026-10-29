@@ -170,6 +170,8 @@ jobs:
       - name: Verify signed APK and bundled files
         run: |
           set -euo pipefail
+          # Annotations are the only diagnostics readable through the API.
+          trap 'echo "::error::verification failed at line $LINENO: $BASH_COMMAND"' ERR
           APK=app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
