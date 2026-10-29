@@ -124,9 +124,13 @@ jobs:
       - name: Select installed Android SDK
         run: |
           set -euo pipefail
-          test -d "$ANDROID_HOME/platforms"
-          PLATFORM=$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-[0-9]*' | sed 's@.*/android-@@' | sort -n | tail -1)
-          test -n "$PLATFORM" && test -s "$ANDROID_HOME/platforms/android-$PLATFORM/android.jar"
+          # The pinned platform when the repository offers it, else the newest one.
+          sdkmanager --install "platforms;android-37" >/dev/null 2>&1 || true
+          PLATFORM=$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-[0-9]*' \
+            | sed 's@.*/android-@@' | sort -n | tail -1)
+          test -n "$PLATFORM" && test -s "$ANDROID_HOME/platforms/android-$PLATFORM/android.jar" \
+            || { echo "::error::no usable Android platform installed"; exit 1; }
+          echo "compiling against android-$PLATFORM"
           echo "OPENCODIE_COMPILE_SDK=$PLATFORM" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
@@ -212,10 +216,10 @@ jobs:
         if: failure()
         run: |
           [ -f build.log ] || { echo "::error::build.log was not created"; exit 0; }
-          # The cause sits right after "What went wrong", so keep the whole tail.
-          tail -n 40 build.log | cut -c1-400 | while IFS= read -r line; do
-            echo "::error::$line"
-          done
+          # One annotation with the cause: GitHub caps annotations per step.
+          CAUSE=$(sed -n '/What went wrong/,+8p' build.log | tr '\n' ' ' | cut -c1-900)
+          [ -n "$CAUSE" ] || CAUSE=$(tail -n 6 build.log | tr '\n' ' ')
+          echo "::error::Gradle failed: $CAUSE"
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4

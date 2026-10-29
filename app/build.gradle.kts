@@ -6,7 +6,7 @@ android {
     namespace = "com.termux"
     // Pinned in runtime.lock; CI overrides it when the SDK repository does not
     // offer that platform yet.
-    compileSdk = (System.getenv("OPENCODIE_COMPILE_SDK") ?: "37").toInt()
+    compileSdk = System.getenv("OPENCODIE_COMPILE_SDK")?.toIntOrNull() ?: 37
 
     defaultConfig {
         // Deliberately the Termux package identity: the bundled Termux prefix is
