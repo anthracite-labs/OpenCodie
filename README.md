@@ -64,8 +64,8 @@ gh secret set OPENCODIE_SIGNING_DECRYPT_KEY < /secure/path/OPENCODIE_ENCRYPTION_
 ```
 
 Pull requests build the debug APK without release signing credentials.
-Pushes to main build APKs; when the signing secret is configured, the release
-APK is signed with the stable key. To publish a GitHub Release, push a
+Pushes to main and release tags **require** the signing secret and produce a
+release APK signed with the stable key. To publish a GitHub Release, push a
 `v*` tag on a tested commit on main. Tagged releases **fail closed** if
 the signing secret has not been configured. Preserve the decryption key
 offline: losing it prevents signing future updates with the same key.
