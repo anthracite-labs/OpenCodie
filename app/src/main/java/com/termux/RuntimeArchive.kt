@@ -53,8 +53,17 @@ internal object RuntimeArchive {
                 // Resolve after keep(): a callback or concurrent actor must not introduce a link parent
                 // between path validation and file creation.
                 val selected = !isLinks && keep(name)
-                val target = File(destination, name)
-                check(target.canonicalPath.startsWith(destination.canonicalPath + File.separator)) { "Archive leaves staging" }
+                // Normalize the full output path before any filesystem sink (CodeQL java/zipslip).
+                val rootPath = destination.canonicalFile.toPath()
+                val targetPath = rootPath.resolve(name).normalize()
+                if (!targetPath.startsWith(rootPath) || targetPath == rootPath) {
+                    throw IllegalStateException("Archive leaves staging")
+                }
+                // A normalized lexical path is not enough when another actor has inserted a symlink.
+                if (!targetPath.toFile().canonicalFile.toPath().startsWith(rootPath)) {
+                    throw IllegalStateException("Archive follows a link outside staging")
+                }
+                val target = targetPath.toFile()
                 if (selected) check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs())
                 if (selected && entry.isDirectory) check(target.isDirectory || target.mkdirs())
                 val text = if (isLinks) ByteArrayOutputStream() else null
