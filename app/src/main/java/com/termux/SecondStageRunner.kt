@@ -39,6 +39,7 @@ const val SECOND_STAGE_TIMEOUT_MS = 600_000L
 private const val WAIT_SLICE_MS = 5_000L
 private const val KILL_GRACE_MS = 3_000L
 private const val READER_JOIN_MS = 3_000L
+private const val STREAM_CLOSE_JOIN_MS = 500L
 private const val DRAIN_CHUNK_CHARS = 8_192
 private const val TAIL_MAX_CHARS = 8_000
 private const val LOG_CHUNK_CHARS = 512
@@ -213,23 +214,36 @@ class SecondStageRunner(
             } catch (_: InterruptedException) {
                 // Second interrupt during teardown: proceed; flag restored below.
             }
-            closeQuietly(process)
+            closeBounded(process)
             val tail = drain.snapshot()
             Thread.currentThread().interrupt()
             return SecondStageResult.Interrupted(tail)
         }
         if (finished) {
+            // A descendant can retain the output pipe after the parent exits.
+            // Wait for EOF only within the *original* monotonic deadline; a
+            // successful parent exit alone must never bypass the watchdog.
             try {
-                drain.thread.join(READER_JOIN_MS)
+                val remaining = deadline - clock.nowMs()
+                if (remaining > 0) drain.thread.join(remaining)
             } catch (_: InterruptedException) {
                 Thread.interrupted()
-                closeQuietly(process)
+                closeBounded(process)
                 Thread.currentThread().interrupt()
                 return SecondStageResult.Interrupted(drain.snapshot())
             }
             val code = process.exitValue()
-            closeQuietly(process)
+            // Process stream close can itself block behind a reader holding a
+            // Java stream lock. Run it on a daemon with a bounded join.
+            val streamsClosed = closeBounded(process)
             val tail = drain.snapshot()
+            if (drain.thread.isAlive || !streamsClosed) {
+                return SecondStageResult.TimedOut(
+                    tail = tail,
+                    terminated = !process.isAlive,
+                    readerSettled = !drain.thread.isAlive,
+                )
+            }
             return if (code == 0) SecondStageResult.Success else SecondStageResult.Failed(code, tail)
         }
         // Timeout: the deadline passed while the child was still alive, even
@@ -254,7 +268,7 @@ class SecondStageRunner(
             }
             exited = !process.isAlive
         }
-        closeQuietly(process)
+        closeBounded(process)
         try {
             drain.thread.join(READER_JOIN_MS)
         } catch (_: InterruptedException) {
@@ -287,12 +301,26 @@ class SecondStageRunner(
         }
     }
 
-    private fun closeQuietly(process: ControlledProcess) {
-        try {
-            process.closeStreams()
-        } catch (_: Exception) {
-            // Cleanup failure must not mask the outcome; termination state is
-            // already captured via isAlive/waitFor return values.
+    /**
+     * Never close a process pipe on the supervisor thread: InputStream.close()
+     * may block behind a read owned by a descendant-held output pipe. The
+     * closer is a daemon, and the caller's wait for it is strictly bounded.
+     * A false result is treated as incomplete cleanup, never as Success.
+     */
+    private fun closeBounded(process: ControlledProcess): Boolean {
+        val closer = Thread({
+            try {
+                process.closeStreams()
+            } catch (_: Exception) {
+                // A failed close must not mask the observed process result.
+            }
+        }, "second-stage-close").apply { isDaemon = true; start() }
+        return try {
+            closer.join(STREAM_CLOSE_JOIN_MS)
+            !closer.isAlive
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
         }
     }
 }
