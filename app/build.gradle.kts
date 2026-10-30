@@ -1,3 +1,7 @@
+val openCodeVersion = rootProject.file("runtime.lock").useLines { lines ->
+    lines.first { it.startsWith("OPENCODE_VERSION=") }.substringAfter("=").removePrefix("v")
+}
+
 plugins {
     id("com.android.application")
 }
@@ -12,7 +16,7 @@ android {
         minSdk = 29
         targetSdk = 28
         versionCode = (System.getenv("OPENCODIE_VERSION_CODE") ?: "1").toInt()
-        versionName = "2.2.2-1"
+        versionName = openCodeVersion
         ndk { abiFilters += "arm64-v8a" }
     }
 
