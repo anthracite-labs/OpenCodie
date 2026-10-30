@@ -42,7 +42,7 @@ The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
   identity and allows executing binaries from the app's private data directory.
   It cannot coexist with another app signed with a different key under the same
   package name; uninstall an existing `com.termux` app first.
-- The default workspace is `~/projects`, not the Termux home directory.
+- The default workspace is `~/projects/workspace`, not the Termux home directory.
   The bundled bootstrap includes Git for project initialization on first launch.
   New installations start in `~/projects/workspace` so the Git button
   creates a project repository, not a Git repository over the whole home directory.
