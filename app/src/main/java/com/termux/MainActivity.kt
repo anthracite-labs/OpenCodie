@@ -9,8 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import android.provider.DocumentsContract
-import android.os.SystemClock
+import android.system.Os
 import android.util.Log
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -28,15 +27,15 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import java.net.HttpURLConnection
+import java.net.URL
 import java.io.File
-import java.io.ByteArrayInputStream
-import java.util.concurrent.ConcurrentHashMap
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 /**
  * Shows the OpenCode WebUI served by the bundled server on loopback.
@@ -49,9 +48,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var fileChooser: ValueCallback<Array<Uri>>? = null
-    private val pendingDownloads = PendingDownloads()
-    private val activeDownloads = ConcurrentHashMap<Uri, DownloadTransfer>()
-    private var noticeUntil = 0L
+    private var pendingDownload: String? = null
     private var resumed = false
 
     // termux-setup-storage broadcasts this action from the app's own Termux process.
@@ -87,25 +84,15 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
         status = TextView(this).apply {
             text = getString(R.string.starting)
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.WHITE)
-            setOnClickListener {
-                if (activeDownloads.isNotEmpty()) activeDownloads.values.forEach { it.cancel() }
-                else if (OpenCodeHost.retryAvailable) OpenCodeHost.retry(this@MainActivity)
-            }
         }
         webView = WebView(this).apply {
-            settings.allowFileAccess = false
-            // The document picker grants selected content URIs for uploads.
-            settings.allowContentAccess = true
-            settings.allowFileAccessFromFileURLs = false
-            settings.allowUniversalAccessFromFileURLs = false
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.textZoom = (resources.configuration.fontScale * 100).toInt()
@@ -113,9 +100,11 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             webViewClient = client
             webChromeClient = chrome
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                if (LocalOrigin.allows(url)) download(url, contentDisposition, mimeType)
+                val uri = Uri.parse(url)
+                if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
+                    uri.port == OpenCodeHost.PORT
+                ) download(url, contentDisposition, mimeType)
             }
         }
         setContentView(FrameLayout(this).apply {
@@ -130,15 +119,9 @@ class MainActivity : Activity() {
     private val client = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
-            if (LocalOrigin.allows(url.toString())) return false
-            if (request.isForMainFrame && url.scheme in listOf("http", "https")) openExternally(url)
+            if (url.scheme == "http" && url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
+            openExternally(url)
             return true
-        }
-
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            if (LocalOrigin.allows(request.url.toString())) return null
-            return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(),
-                ByteArrayInputStream(ByteArray(0)))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -173,10 +156,6 @@ class MainActivity : Activity() {
 
     @Deprecated("super.onActivityResult still delivers the picker results")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        pendingDownloads.take(requestCode)?.let { request ->
-            if (resultCode == RESULT_OK && data?.data != null) save(request, data.data!!)
-            return
-        }
         when (requestCode) {
             FILE_CHOOSER_REQUEST -> {
                 val uris: Array<Uri>? = if (resultCode != RESULT_OK) {
@@ -188,6 +167,13 @@ class MainActivity : Activity() {
                 }
                 fileChooser?.onReceiveValue(uris)
                 fileChooser = null
+            }
+            SAVE_FILE_REQUEST -> {
+                val url = pendingDownload
+                pendingDownload = null
+                if (resultCode == RESULT_OK && url != null && data?.data != null) {
+                    save(url, data.data!!)
+                }
             }
             STORAGE_SETTINGS_REQUEST -> {
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
@@ -252,6 +238,8 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val storage = File(Termux.HOME, "storage")
+                check(!Files.isSymbolicLink(storage.toPath())) { "~/storage is a symlink" }
+                check(storage.isDirectory || storage.mkdirs()) { "Cannot create ~/storage" }
 
                 val links = linkedMapOf(
                     "shared" to Environment.getExternalStorageDirectory(),
@@ -270,59 +258,61 @@ class MainActivity : Activity() {
                 externalMediaDirs.forEachIndexed { index, dir ->
                     if (dir != null) links["media-$index"] = dir
                 }
-                StorageLinks.setup(storage, links)
+                for ((name, target) in links) {
+                    val link = File(storage, name).toPath()
+                    if (Files.isSymbolicLink(link)) {
+                        check(Files.readSymbolicLink(link).toString() == target.absolutePath) {
+                            "Existing ~/storage/$name link points elsewhere"
+                        }
+                    } else {
+                        check(!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+                            "~/storage/$name already exists; keeping user data"
+                        }
+                        Os.symlink(target.absolutePath, link.toString())
+                    }
+                }
                 show("Termux storage ready: ~/storage")
             } catch (e: Exception) {
-                Log.e("OpenCodieStorage", "Could not set up shared storage")
-                show("Storage setup failed; existing files were preserved. Check ~/storage for conflicting entries.")
+                Log.e("OpenCodieStorage", "Could not set up shared storage", e)
+                show("Storage setup failed: ${e.message}")
             }
         }.start()
     }
 
     /** Asks the platform picker where to save, then streams the loopback response there. */
     private fun download(url: String, contentDisposition: String?, mimeType: String?) {
-        val requestCode = try {
-            pendingDownloads.add(url, CookieManager.getInstance().getCookie(url))
-        } catch (_: IllegalStateException) {
-            show("Too many pending downloads")
-            return
-        }
+        pendingDownload = url
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, URLUtil.guessFileName(url, contentDisposition, mimeType))
         }
         try {
-            startActivityForResult(intent, requestCode)
+            startActivityForResult(intent, SAVE_FILE_REQUEST)
         } catch (e: ActivityNotFoundException) {
-            pendingDownloads.take(requestCode)
+            pendingDownload = null
             show("No file picker available")
         }
     }
 
-    private fun save(request: DownloadRequest, destination: Uri) {
-        val transfer = DownloadTransfer()
-        if (activeDownloads.putIfAbsent(destination, transfer) != null) {
-            show("This destination is already being saved")
-            return
-        }
-        show("Saving… Tap to cancel.")
+    private fun save(url: String, destination: Uri) {
+        show(getString(R.string.saving))
         Thread {
-            var message = getString(R.string.saved)
             try {
-                transfer.copy(request, {
-                    checkNotNull(contentResolver.openOutputStream(destination, "w")) { "Cannot open selected document" }
-                })
-            } catch (_: Exception) {
-                // ACTION_CREATE_DOCUMENT creates a new document; remove only that incomplete output.
-                val removed = try { DocumentsContract.deleteDocument(contentResolver, destination) } catch (_: Exception) { false }
-                message = if (transfer.cancelled) "Download canceled" else "Download failed; please retry"
-                if (!removed) message += "; remove the incomplete document from the selected folder"
-            } finally {
-                activeDownloads.remove(destination, transfer)
+                val connection = URL(url).openConnection() as HttpURLConnection
+                CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
+                connection.connectTimeout = 10_000
+                connection.inputStream.use { input ->
+                    contentResolver.openOutputStream(destination, "w").use { output ->
+                        checkNotNull(output) { "Could not open $destination" }
+                        input.copyTo(output)
+                    }
+                }
+                show(getString(R.string.saved))
+            } catch (e: Exception) {
+                show(getString(R.string.download_failed, e.message ?: e.toString()))
             }
-            show(message)
-        }.apply { isDaemon = true; start() }
+        }.apply { isDaemon = true }.start()
     }
 
     /**
@@ -334,24 +324,21 @@ class MainActivity : Activity() {
             maybeRequestBootstrapStorage()
             val error = OpenCodeHost.error
             val url = OpenCodeHost.pairingUrl
-            if (url != null && url != loadedUrl) {
-                loadedUrl = url
-                webView.loadUrl(url)
-            }
             when {
-                activeDownloads.isNotEmpty() -> {
-                    status.visibility = View.VISIBLE
-                    status.text = "Saving ${activeDownloads.size} download(s): ${activeDownloads.values.sumOf { it.bytesCopied }} bytes. Tap to cancel."
+                url != null -> {
+                    status.visibility = View.GONE
+                    if (url != loadedUrl) {
+                        loadedUrl = url
+                        webView.loadUrl(url)
+                    }
                 }
-                SystemClock.uptimeMillis() < noticeUntil -> Unit
-                url != null -> { status.visibility = View.GONE }
                 loadedUrl != null -> {
                     status.visibility = View.VISIBLE
                     status.text = getString(R.string.reconnecting)
                 }
                 error != null -> {
                     status.visibility = View.VISIBLE
-                    status.text = getString(R.string.failed, error) + if (OpenCodeHost.retryAvailable) "\nTap to retry." else ""
+                    status.text = getString(R.string.failed, error)
                 }
                 else -> {
                     status.visibility = View.VISIBLE
@@ -364,7 +351,6 @@ class MainActivity : Activity() {
 
     private fun show(message: String) {
         handler.post {
-            noticeUntil = SystemClock.uptimeMillis() + NOTICE_MS
             status.visibility = View.VISIBLE
             status.text = message
             handler.postDelayed({ if (loadedUrl != null) status.visibility = View.GONE }, NOTICE_MS)
@@ -375,7 +361,7 @@ class MainActivity : Activity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, url))
         } catch (e: ActivityNotFoundException) {
-            show("No application available to open this external link")
+            show(getString(R.string.failed, url.toString()))
         }
     }
 
@@ -385,10 +371,6 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        activeDownloads.values.forEach { it.cancel() }
-        pendingDownloads.clear()
-        fileChooser?.onReceiveValue(null)
-        fileChooser = null
         handler.removeCallbacksAndMessages(null)
         webView.destroy()
         super.onDestroy()
@@ -399,6 +381,7 @@ class MainActivity : Activity() {
         const val RECONNECT_POLL_MS = 2_000L
         const val NOTICE_MS = 3_000L
         const val FILE_CHOOSER_REQUEST = 1
+        const val SAVE_FILE_REQUEST = 2
         const val STORAGE_PERMISSION_REQUEST = 3
         const val STORAGE_SETTINGS_REQUEST = 4
         const val STORAGE_ACTION = "com.termux.app.reload_style"

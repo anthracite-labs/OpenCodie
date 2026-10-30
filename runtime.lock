@@ -23,7 +23,6 @@ TERMUX_BOOTSTRAP_COMMIT=4fd34c88f930defaed700fc5123536f5d9dce266
 TERMUX_PACKAGES_REPO=https://github.com/termux/termux-packages.git
 TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git
 
-# Downloaded binary digests and their sources are pinned in scripts/source-integrity.json.
 # Android toolchain.
 ANDROID_COMPILE_SDK=37
 ANDROID_TARGET_SDK=28
