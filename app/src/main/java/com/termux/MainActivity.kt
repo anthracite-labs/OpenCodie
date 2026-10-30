@@ -87,7 +87,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         status = TextView(this).apply {
             text = getString(R.string.starting)
@@ -273,8 +273,8 @@ class MainActivity : Activity() {
                 StorageLinks.setup(storage, links)
                 show("Termux storage ready: ~/storage")
             } catch (e: Exception) {
-                Log.e("OpenCodieStorage", "Could not set up shared storage", e)
-                show("Storage setup failed: ${e.message}")
+                Log.e("OpenCodieStorage", "Could not set up shared storage")
+                show("Storage setup failed; existing files were preserved. Check ~/storage for conflicting entries.")
             }
         }.start()
     }
@@ -375,7 +375,7 @@ class MainActivity : Activity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, url))
         } catch (e: ActivityNotFoundException) {
-            show(getString(R.string.failed, url.toString()))
+            show("No application available to open this external link")
         }
     }
 

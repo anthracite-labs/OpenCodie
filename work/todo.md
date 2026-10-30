@@ -48,7 +48,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T07 | request-scoped picker + bounded HTTP | Request registry/transfer behavioral tests fail before implementation (`work/t07-red.log`) | Real HTTP byte export/local redirect/off-origin rejection/HTTP500 + cancellation, picker identity tests and debug build PASS (`work/t07-build.log`) | Android document-provider cancel/cleanup and concurrent picker UI still require device lane |
 | T08 | retain approved prompt; storage link preflight | Missing StorageLinks behavior helper fails (`work/t08-red.log`) | Conflict preflight, injected partial-create rollback/idempotence, Python contracts + debug build PASS (`work/t08-build.log`) | User explicitly retained automatic prompt; API29/30+ grant/deny/retry checks require device |
 | T09 | manual migration docs | Existing malformed/custom configs covered by T01 byte-preservation tests | Manual JSON recommendation exactly matches schema-tested shipped V2 policy; backup/restore + override caveats documented | Maintainer chose manual instructions; no automatic merge/UI or config changes |
-| T10 | — | — | — | — |
+| T10 | fixed diagnostic categories | Secret-bearing log tests fail before Diagnostics exists (`work/t10-red.log`) | Synthetic password/cookie/pair URL/API key and huge-output tests PASS; all 23 JVM tests including genuine fixture PASS; debug + Android test APKs PASS (`work/t10-genuine-build.log`) | Release WebView debugging now explicitly follows BuildConfig.DEBUG; runtime device Logcat check pending |
 | T11 | — | — | — | — |
 
 ### Execution environment — 2026-10-30

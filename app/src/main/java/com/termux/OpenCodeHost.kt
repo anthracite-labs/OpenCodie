@@ -112,6 +112,7 @@ object OpenCodeHost {
     }
 
     private fun launch(context: Context): Process {
+        synchronized(output) { output.setLength(0) }
         password = storedPassword(context)
         val workspace = File(Termux.HOME, "projects/workspace")
         check(workspace.isDirectory || workspace.mkdirs()) { "Cannot create project workspace: $workspace" }
@@ -127,15 +128,21 @@ object OpenCodeHost {
         val started = builder.start()
         Thread {
             try {
-                started.inputStream.bufferedReader().forEachLine { line ->
-                    Log.i(TAG, line)
-                    synchronized(output) {
-                        output.append(line).append('\n')
-                        if (output.length > LOG_LIMIT) output.delete(0, output.length - LOG_LIMIT)
+                started.inputStream.bufferedReader().use { reader ->
+                    val buffer = CharArray(2048)
+                    while (true) {
+                        val size = reader.read(buffer)
+                        if (size < 0) break
+                        val category = Diagnostics.fromOutput(String(buffer, 0, size)) ?: continue
+                        Log.i(TAG, category)
+                        synchronized(output) {
+                            output.append(category).append('\n')
+                            if (output.length > LOG_LIMIT) output.delete(0, output.length - LOG_LIMIT)
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "server output closed", e)
+                Log.w(TAG, "Server output stream closed")
             }
         }.apply { isDaemon = true }.start()
         return started
@@ -198,9 +205,10 @@ object OpenCodeHost {
     }
 
     private fun fail(message: String, e: Exception) {
-        Log.e(TAG, message, e)
+        val safeMessage = "$message. ${Diagnostics.failure(e)}"
+        Log.e(TAG, safeMessage)
         status = message
-        error = "$message: ${e.message ?: e.toString()}"
+        error = safeMessage
     }
 
     private fun log(): String = synchronized(output) { output.toString() }
