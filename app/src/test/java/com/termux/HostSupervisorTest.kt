@@ -7,6 +7,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HostSupervisorTest {
+    @Test fun unacknowledgedChildShutdownBlocksFurtherStarts() {
+        val done = CountDownLatch(1)
+        val runs = AtomicInteger()
+        val host = HostSupervisor { token ->
+            runs.incrementAndGet()
+            token.restartAllowed = false
+            done.countDown()
+        }
+        host.start()
+        assertTrue(done.await(2, TimeUnit.SECONDS))
+        Thread.sleep(50)
+        repeat(10) { host.start(); Thread.sleep(5) }
+        assertEquals(1, runs.get())
+    }
+
     @Test fun stopStartQueuesRestartUntilTheOldOwnerAcknowledgesShutdown() {
         val entered = CountDownLatch(1)
         val retired = CountDownLatch(1)

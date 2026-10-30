@@ -58,6 +58,11 @@ internal class RuntimeUpgrade(
     }
 
     fun recover(committed: Boolean, installed: String) {
+        check(!Files.isSymbolicLink(prefix.toPath()) && !Files.isSymbolicLink(backup.toPath()) &&
+            !Files.isSymbolicLink(launcherBackup.toPath())) { "Unverified runtime recovery paths preserved" }
+        for (path in listOf(active, launcher, version)) {
+            check(path.canonicalPath.startsWith(prefix.canonicalPath + File.separator)) { "Unverified recovery path leaves prefix" }
+        }
         if (committed) {
             FileOps.removeTree(backup)
             Files.deleteIfExists(launcherBackup.toPath())

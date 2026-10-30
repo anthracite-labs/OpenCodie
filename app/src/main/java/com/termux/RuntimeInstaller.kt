@@ -3,6 +3,8 @@ package com.termux
 import android.content.Context
 import android.os.Process
 import android.system.Os
+import android.system.OsConstants
+import android.system.ErrnoException
 import java.io.File
 import java.security.MessageDigest
 
@@ -32,6 +34,7 @@ object RuntimeInstaller {
 
     fun installIfNeeded(context: Context, log: (String) -> Unit) {
         val files = context.filesDir
+        BootstrapJournal(files, ::bootstrapGroupAlive).recover()
         val prefix = File(files, "usr")
         val staging = File(files, "usr-staging")
         val ready = File(files, READY_FILE)
@@ -50,7 +53,7 @@ object RuntimeInstaller {
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
-            log("Termux runtime $bundled ready")
+            log("Termux runtime ready")
             return
         }
 
@@ -58,12 +61,12 @@ object RuntimeInstaller {
         // If an interrupted upgrade left backup files, rollback before retry.
         recoverUpgrade(files, prefix, installed == bundled, log)
         if (installed != bundled) {
-            log("Upgrading OpenCode $installed -> $bundled")
+            log("Updating bundled OpenCode")
             upgrade(context, prefix, files)
         }
         ensureDirectories(prefix)
         writeOpenCodeConfig(context, log)
-        log("Runtime $bundled ready")
+        log("Runtime ready")
     }
 
     /** Select the stock Termux origin mirror before the first pkg call. */
@@ -156,7 +159,11 @@ object RuntimeInstaller {
             .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" }
             ?: error("Bundled Termux bootstrap second-stage script is missing")
         log("Configuring Termux packages")
-        val process = ProcessBuilder("${prefix.path}/bin/bash", script.path)
+        val groupFile = File.createTempFile("bootstrap-group-", ".pid", File(Termux.CACHE))
+        val bash = "${prefix.path}/bin/bash"
+        val journal = BootstrapJournal(prefix.parentFile!!, ::bootstrapGroupAlive)
+        val id = journal.begin()
+        val process = ProcessBuilder(BootstrapProcess.command("${prefix.path}/bin/setsid", bash, script.path, groupFile.path, journal.ack(id).path))
             .directory(File(Termux.HOME))
             .redirectErrorStream(true)
             .apply {
@@ -166,8 +173,36 @@ object RuntimeInstaller {
                 }
             }
             .start()
-        BootstrapProcess.await(process)
+        var cleaned = false
+        fun cleanup() {
+            val group = BootstrapProcess.groupId(groupFile, BootstrapProcess.currentGroup())
+            if (group == null) {
+                // An unauthorized launcher cannot execute scripts; its unique ack will never be published.
+                ChildProcess.terminate(process)
+            } else {
+                ProcessGroup.terminate(process,
+                    signal = { signal ->
+                        try { Os.kill(-group, signal) } catch (error: ErrnoException) {
+                            if (error.errno != OsConstants.ESRCH) throw ChildProcess.Unterminated()
+                        }
+                    }, alive = { bootstrapGroupAlive(group) })
+            }
+            cleaned = true
+        }
+        try {
+            BootstrapProcess.authorize(process, groupFile, journal, id, BootstrapProcess.currentGroup())
+            BootstrapProcess.await(process, cleanup = ::cleanup)
+        } finally {
+            if (!cleaned) cleanup()
+            if (cleaned) journal.finish(id)
+            groupFile.delete()
+        }
     }
+
+    private fun bootstrapGroupAlive(group: Int): Boolean = try {
+        Os.kill(-group, 0)
+        true
+    } catch (error: ErrnoException) { error.errno != OsConstants.ESRCH }
 
     /** Initial OpenCode configuration; later user edits are preserved. */
     private fun writeOpenCodeConfig(contextForConfig: Context, log: (String) -> Unit) {

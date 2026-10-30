@@ -8,6 +8,23 @@ import org.junit.Test
 class RuntimeRecoveryTest {
     private class Crash : Error()
 
+    @Test fun recoveryNeverTraversesARelocatedUserDirectory() {
+        val root = Files.createTempDirectory("recovery").toFile()
+        val external = Files.createTempDirectory("user-data").toFile()
+        try {
+            val prefix = root.resolve("usr").apply { mkdirs() }
+            external.resolve("opencode").mkdirs()
+            external.resolve("opencode/keep").writeText("user")
+            Files.createSymbolicLink(prefix.resolve("libexec").toPath(), external.toPath())
+            root.resolve("opencode-backup").mkdirs()
+            root.resolve("opencode-backup/old").writeText("old")
+            try { RuntimeUpgrade(root, prefix).recover(false, "old"); fail("External recovery path accepted") }
+            catch (_: IllegalStateException) { }
+            assertEquals("user", external.resolve("opencode/keep").readText())
+            assertEquals("old", root.resolve("opencode-backup/old").readText())
+        } finally { FileOps.removeTree(root); FileOps.removeTree(external) }
+    }
+
     @Test fun everyUpgradeInterruptionRecoversOldOrCommittedNewBytes() {
         for (point in listOf("launcher-backed-up", "binary-backed-up", "binary-activated",
             "launcher-staged", "launcher-activated", "version-written", "ready-written", "backup-cleared")) {

@@ -21,8 +21,10 @@ internal class HostSupervisor(private val run: (Cancellation) -> Unit) {
     private var worker: Thread? = null
     private var cancellation: Cancellation? = null
     private var requested = false
+    private var retirementFailed = false
 
     @Synchronized fun start() {
+        if (retirementFailed) return
         requested = true
         if (worker != null) return
         launch()
@@ -36,6 +38,7 @@ internal class HostSupervisor(private val run: (Cancellation) -> Unit) {
                 run(token)
             } finally {
                 synchronized(this) {
+                    if (!token.restartAllowed) retirementFailed = true
                     worker = null
                     if (requested && token.cancelled && token.restartAllowed) launch()
                 }

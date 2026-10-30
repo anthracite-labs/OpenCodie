@@ -9,6 +9,7 @@ internal object Diagnostics {
             "enospc" in value || "no space left" in value -> "Device storage is full; free space and retry."
             "eacces" in value || "permission denied" in value -> "A required runtime path is inaccessible."
             "checksum mismatch" in value || "integrity" in value -> "Bundled runtime integrity verification failed; reinstall a verified APK."
+            "bootstrap process may still be running" in value -> "Force-stop OpenCodie in Android settings, then reopen. The unfinished runtime was preserved."
             "unverified" in value -> "The existing runtime is unverified; user files were preserved."
             "unsafe" in value || "symlink" in value || "archive" in value -> "The bundled runtime archive was rejected."
             "timed out" in value || "deadline" in value -> "Runtime startup timed out; retry package configuration."
