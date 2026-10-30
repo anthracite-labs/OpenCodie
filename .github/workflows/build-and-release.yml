@@ -211,13 +211,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   publish:
-    name: Publish signed GitHub release
+    name: Publish raw signed OpenCodie.apk
     needs: apk
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: OpenCodie
@@ -227,8 +228,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          source ./runtime.lock
+          version="${OPENCODE_VERSION#v}"
           APK=dist-apk/OpenCodie.apk
-          test -n "$APK" && test -s "$APK"
-          gh release create "$GITHUB_REF_NAME" \
-            "$APK#OpenCodie.apk" \
-            --verify-tag --generate-notes
+          test -s "$APK"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version" || {
+              echo "::error::Release tag must match OpenCode v$version"; exit 1;
+            }
+            gh release create "$GITHUB_REF_NAME" \
+              "$APK#OpenCodie.apk" --verify-tag --generate-notes
+          else
+            # Direct APK downloads from Releases; Actions artifacts are always ZIPs.
+            tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+            gh release create "$tag" \
+              "$APK#OpenCodie.apk" --target "$GITHUB_SHA" \
+              --title "OpenCodie v$version (build $GITHUB_RUN_NUMBER)" \
+              --prerelease --generate-notes
+          fi
