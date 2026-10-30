@@ -1,5 +1,6 @@
 """Build-contract checks for the single Android release artifact."""
 from pathlib import Path
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,37 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('Files.isSymbolicLink', activity)
         self.assertIn('TERMUX__USER_ID" to (uid / 100_000).toString()', env)
         self.assertIn('"bin/am"', workflow)
+
+    def test_scripts_with_shebang_are_executable_in_the_index(self):
+        """A shebang script must be 100755 in git, not only in the worktree.
+
+        A fresh clone restores the mode recorded in the index, so a 100644 entry
+        turns every documented `scripts/foo.sh` invocation into "Permission
+        denied" no matter how the file is chmodded locally.
+
+        Regression: 0c15735 dropped scripts/build-opencode.sh from 100755 to
+        100644 while changing its contents, and scripts/patch-opentui-loader.py
+        was committed as 100644 from the start.
+        """
+        listing = subprocess.run(
+            ["git", "ls-files", "-s", "--", "scripts/"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertTrue(listing.strip(), "expected tracked files under scripts/")
+
+        offenders = []
+        for line in listing.splitlines():
+            meta, path = line.split("\t", 1)
+            mode = meta.split()[0]
+            script = ROOT / path
+            if script.is_file() and script.read_bytes().startswith(b"#!"):
+                if mode != "100755":
+                    offenders.append(f"{path} is {mode}")
+
+        self.assertEqual(offenders, [], "shebang scripts must be 100755 in git")
 
     def test_git_installed_with_bootstrap_and_safe_workspace(self):
         lock = (ROOT / "runtime.lock").read_text()
