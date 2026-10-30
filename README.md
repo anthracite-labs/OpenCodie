@@ -44,8 +44,8 @@ The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
   package name; uninstall an existing `com.termux` app first.
 - The default workspace is `~/projects`, not the Termux home directory.
   The bundled bootstrap includes Git for project initialization on first launch.
-  Git discovery does not traverse into an accidental `~/.git` parent repository.
-  Existing user files and existing Git repositories are never deleted.
+  New installations start in `~/projects/workspace` so the Git button
+  creates a project repository, not a Git repository over the whole home directory.
   OpenCode's shell tool is noninteractive; when requesting package installation,
   use `pkg install -y <package>` to avoid the confirmation prompt.
 - First launch extracts the bundled runtime (no network). An app-owned
