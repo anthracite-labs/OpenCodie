@@ -24,4 +24,21 @@ class DiagnosticsTest {
         assertTrue(Diagnostics.failure(java.io.IOException("ENOSPC /private/path")).contains("storage"))
         assertTrue(Diagnostics.failure(IllegalStateException("Unverified existing Termux prefix preserved")).contains("preserved"))
     }
+
+    @Test fun bootstrapLauncherAndUnknownIoAreNotMisdiagnosedAsFullStorage() {
+        val launcher = Diagnostics.failure(java.io.IOException("Bootstrap launcher stopped before authorization"))
+        assertTrue(launcher.contains("launcher"))
+        assertFalse(launcher.contains("free storage"))
+        val other = Diagnostics.failure(java.io.IOException("Unknown device I/O failure"))
+        assertFalse(other.contains("free storage"))
+        assertTrue(other.contains("setup"))
+    }
+
+    @Test fun nestedIoCausesAreCategorizedWithoutLeakingRawMessages() {
+        val error = IllegalStateException("Unsafe or unreadable bundled runtime archive",
+            java.io.IOException("ENOSPC; credential=local-secret"))
+        val safe = Diagnostics.failure(error)
+        assertTrue(safe.contains("storage is full"))
+        assertFalse(safe.contains("local-secret"))
+    }
 }
