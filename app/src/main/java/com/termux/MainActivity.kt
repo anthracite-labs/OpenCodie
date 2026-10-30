@@ -98,6 +98,11 @@ class MainActivity : Activity() {
             settings.textZoom = (resources.configuration.fontScale * 100).toInt()
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
+            settings.safeBrowsingEnabled = true
             webViewClient = client
             webChromeClient = chrome
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
@@ -214,17 +219,10 @@ class MainActivity : Activity() {
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                 data = Uri.parse("package:$packageName")
             }
-            try {
-                startActivityForResult(intent, STORAGE_SETTINGS_REQUEST)
-            } catch (_: ActivityNotFoundException) {
-                try {
-                    startActivityForResult(
-                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
-                        STORAGE_SETTINGS_REQUEST,
-                    )
-                } catch (_: ActivityNotFoundException) {
-                    show("Android storage settings unavailable")
-                }
+            val fallback = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            if (startForResultSafely(intent, STORAGE_SETTINGS_REQUEST)) return
+            startForResultSafely(fallback, STORAGE_SETTINGS_REQUEST) {
+                show("Android storage settings unavailable")
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             setupStorageLinks()
@@ -287,9 +285,7 @@ class MainActivity : Activity() {
             type = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, URLUtil.guessFileName(url, contentDisposition, mimeType))
         }
-        try {
-            startActivityForResult(intent, SAVE_FILE_REQUEST)
-        } catch (e: ActivityNotFoundException) {
+        startForResultSafely(intent, SAVE_FILE_REQUEST) {
             pendingDownload = null
             show("No file picker available")
         }
@@ -360,8 +356,18 @@ class MainActivity : Activity() {
     private fun openExternally(url: Uri) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, url))
-        } catch (e: ActivityNotFoundException) {
+        } catch (_: ActivityNotFoundException) {
             show(getString(R.string.failed, url.toString()))
+        }
+    }
+
+    private fun startForResultSafely(intent: Intent, requestCode: Int, onMissing: () -> Unit): Boolean {
+        return try {
+            startActivityForResult(intent, requestCode)
+            true
+        } catch (_: ActivityNotFoundException) {
+            onMissing()
+            false
         }
     }
 

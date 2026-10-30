@@ -194,5 +194,33 @@ class BuildContractTest(unittest.TestCase):
         self.assertNotIn("opencode.bin", host)
 
 
+    def test_webview_hardening_disables_file_access(self):
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        self.assertIn("settings.allowFileAccess = false", activity)
+        self.assertIn("settings.allowContentAccess = false", activity)
+        self.assertIn("settings.allowFileAccessFromFileURLs = false", activity)
+        self.assertIn("settings.allowUniversalAccessFromFileURLs = false", activity)
+        self.assertIn("settings.safeBrowsingEnabled = true", activity)
+        self.assertIn("startForResultSafely", activity)
+
+    def test_loopback_cleartext_only_with_manifest_permissions(self):
+        manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
+        config = (ROOT / "app/src/main/res/xml/network_security_config.xml").read_text()
+        self.assertIn('android:networkSecurityConfig="@xml/network_security_config"', manifest)
+        self.assertIn("FOREGROUND_SERVICE_DATA_SYNC", manifest)
+        self.assertIn("POST_NOTIFICATIONS", manifest)
+        self.assertIn('<domain includeSubdomains="false">127.0.0.1</domain>', config)
+        self.assertIn('cleartextTrafficPermitted="false"', config)
+
+    def test_shared_shell_helper_is_sourced(self):
+        lib = (ROOT / "scripts/lib.sh").read_text()
+        build = (ROOT / "scripts/build-opencode.sh").read_text()
+        runtime = (ROOT / "scripts/build-runtime.sh").read_text()
+        self.assertIn("checkout_pinned()", lib)
+        self.assertIn('source "$REPO_ROOT/scripts/lib.sh"', build)
+        self.assertIn('source "$REPO_ROOT/scripts/lib.sh"', runtime)
+        self.assertIn('checkout_pinned "$TERMUX" "$TERMUX_BOOTSTRAP_COMMIT"', runtime)
+
+
 if __name__ == "__main__":
     unittest.main()

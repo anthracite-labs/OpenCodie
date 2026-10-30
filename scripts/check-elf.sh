@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Shared ELF gate for shipped Android artifacts.
 #
-# Used inline by .github/workflows/build-weekly.yml (so the gates are one
-# reviewable file instead of shell snippets in YAML) and re-runnable from the
-# tests (tests/vendor.bats) or by hand:
+# Used by scripts/build-opencode.sh, scripts/build-natives.sh and
+# .github/workflows/build-and-release.yml (so the gates are one
+# reviewable file instead of shell snippets in YAML) and re-runnable by hand:
 #
 #   scripts/check-elf.sh --no-glibc --arch aarch64 vendor/libopentui-*.so
 #

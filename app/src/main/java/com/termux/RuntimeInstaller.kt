@@ -352,7 +352,9 @@ object RuntimeInstaller {
     private fun isJsonObject(file: File): Boolean = try {
         JSONObject(file.readText())
         true
-    } catch (e: Exception) {
+    } catch (_: org.json.JSONException) {
+        false
+    } catch (_: java.io.IOException) {
         false
     }
 

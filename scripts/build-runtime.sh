@@ -8,6 +8,8 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../runtime.lock disable=SC1091
 source "$REPO_ROOT/runtime.lock"
+# shellcheck source=lib.sh disable=SC1091
+source "$REPO_ROOT/scripts/lib.sh"
 
 WORK="${WORK:-$REPO_ROOT/work}"
 DIST="${DIST:-$REPO_ROOT/dist}"
@@ -30,10 +32,7 @@ if [ ! -f "$BOOTSTRAP" ] || [ "$(cat "$BOOTSTRAP_KEY" 2>/dev/null || true)" != "
         mkdir -p "$WORK"
         git clone --filter=blob:none --no-checkout "$TERMUX_PACKAGES_REPO" "$TERMUX"
     fi
-    if [ "$(git -C "$TERMUX" rev-parse HEAD 2>/dev/null || true)" != "$TERMUX_BOOTSTRAP_COMMIT" ]; then
-        git -C "$TERMUX" fetch --depth 1 origin "$TERMUX_BOOTSTRAP_COMMIT"
-        git -C "$TERMUX" -c advice.detachedHead=false checkout --detach "$TERMUX_BOOTSTRAP_COMMIT"
-    fi
+    checkout_pinned "$TERMUX" "$TERMUX_BOOTSTRAP_COMMIT"
     test "$(git -C "$TERMUX" rev-parse HEAD)" = "$TERMUX_BOOTSTRAP_COMMIT" || {
         echo "wrong termux-packages revision" >&2
         exit 1

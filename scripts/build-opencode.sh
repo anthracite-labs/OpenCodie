@@ -12,6 +12,8 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../runtime.lock disable=SC1091
 source "$REPO_ROOT/runtime.lock"
+# shellcheck source=lib.sh disable=SC1091
+source "$REPO_ROOT/scripts/lib.sh"
 
 WORK="${WORK:-$REPO_ROOT/work}"
 DIST="${DIST:-$REPO_ROOT/dist}"
@@ -22,18 +24,6 @@ command -v bun >/dev/null || { echo "bun is not installed (need $BUN_VERSION)" >
 test "$(bun --version)" = "$BUN_VERSION" || {
     echo "bun $BUN_VERSION required, found $(bun --version)" >&2
     exit 1
-}
-
-# Pinned source revision: tags are never trusted on their own.
-checkout_pinned() {
-    local dir="$1" sha="$2"
-    if git -C "$dir" rev-parse HEAD 2>/dev/null | grep -q "^$sha"; then return 0; fi
-    git -C "$dir" fetch --depth 1 origin "$sha"
-    git -C "$dir" -c advice.detachedHead=false checkout --detach "$sha"
-    test "$(git -C "$dir" rev-parse HEAD)" = "$sha" || {
-        echo "wrong revision in $dir (expected $sha)" >&2
-        exit 1
-    }
 }
 
 echo "==> upstream $OPENCODE_VERSION @ $OPENCODE_COMMIT"
