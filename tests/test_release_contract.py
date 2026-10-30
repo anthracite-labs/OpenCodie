@@ -61,7 +61,8 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('Environment.isExternalStorageManager()', activity)
         self.assertIn('Manifest.permission.WRITE_EXTERNAL_STORAGE', activity)
         self.assertIn('File(Termux.HOME, "storage")', activity)
-        self.assertIn('Files.isSymbolicLink', activity)
+        self.assertIn('StorageLinks.setup(storage, links)', activity)
+        self.assertIn('Files.isSymbolicLink', (ROOT / 'app/src/main/java/com/termux/StorageLinks.kt').read_text())
         self.assertIn('TERMUX__USER_ID" to (uid / 100_000).toString()', env)
         self.assertIn('"bin/am"', workflow)
 

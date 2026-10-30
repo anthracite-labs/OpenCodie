@@ -46,7 +46,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T05 | owned initial install + transactional upgrade | Missing behavioral recovery helpers fail (`work/t05-red.log`); prior rollback restored binary before launcher, losing recovery journal | 8 upgrade fault points, rollback retry, unknown-prefix preservation, no-follow deletion and real stalled process deadline PASS; debug build PASS (`work/t05-build.log`) | Tap-to-retry for recoverable bootstrap I/O only; on-device install/upgrade still pending |
 | T06 | bounded no-follow staging extraction | Malicious ZIP helper regressions fail before extractor exists (`work/t06-red.log`) | Traversal, duplicate/type collision, link cycle/parent/target, actual size/count fixtures PASS; debug build PASS (`work/t06-build.log`) | Genuine fixture gate added to CI; local genuine archive absent, so its test is explicitly skipped |
 | T07 | request-scoped picker + bounded HTTP | Request registry/transfer behavioral tests fail before implementation (`work/t07-red.log`) | Real HTTP byte export/local redirect/off-origin rejection/HTTP500 + cancellation, picker identity tests and debug build PASS (`work/t07-build.log`) | Android document-provider cancel/cleanup and concurrent picker UI still require device lane |
-| T08 | — | — | — | — |
+| T08 | retain approved prompt; storage link preflight | Missing StorageLinks behavior helper fails (`work/t08-red.log`) | Conflict preflight, injected partial-create rollback/idempotence, Python contracts + debug build PASS (`work/t08-build.log`) | User explicitly retained automatic prompt; API29/30+ grant/deny/retry checks require device |
 | T09 | — | — | — | — |
 | T10 | — | — | — | — |
 | T11 | — | — | — | — |

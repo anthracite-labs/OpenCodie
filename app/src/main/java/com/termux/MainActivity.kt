@@ -11,7 +11,6 @@ import android.os.Environment
 import android.provider.Settings
 import android.provider.DocumentsContract
 import android.os.SystemClock
-import android.system.Os
 import android.util.Log
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -38,8 +37,6 @@ import android.widget.TextView
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.util.concurrent.ConcurrentHashMap
-import java.nio.file.Files
-import java.nio.file.LinkOption
 
 /**
  * Shows the OpenCode WebUI served by the bundled server on loopback.
@@ -255,8 +252,6 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val storage = File(Termux.HOME, "storage")
-                check(!Files.isSymbolicLink(storage.toPath())) { "~/storage is a symlink" }
-                check(storage.isDirectory || storage.mkdirs()) { "Cannot create ~/storage" }
 
                 val links = linkedMapOf(
                     "shared" to Environment.getExternalStorageDirectory(),
@@ -275,19 +270,7 @@ class MainActivity : Activity() {
                 externalMediaDirs.forEachIndexed { index, dir ->
                     if (dir != null) links["media-$index"] = dir
                 }
-                for ((name, target) in links) {
-                    val link = File(storage, name).toPath()
-                    if (Files.isSymbolicLink(link)) {
-                        check(Files.readSymbolicLink(link).toString() == target.absolutePath) {
-                            "Existing ~/storage/$name link points elsewhere"
-                        }
-                    } else {
-                        check(!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
-                            "~/storage/$name already exists; keeping user data"
-                        }
-                        Os.symlink(target.absolutePath, link.toString())
-                    }
-                }
+                StorageLinks.setup(storage, links)
                 show("Termux storage ready: ~/storage")
             } catch (e: Exception) {
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
