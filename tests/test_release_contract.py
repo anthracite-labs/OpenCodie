@@ -25,6 +25,8 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git", lock)
         self.assertIn('File(Termux.HOME, "projects")', host)
         self.assertIn(".directory(workspace)", host)
+        termux = (ROOT / "app/src/main/java/com/termux/Termux.kt").read_text()
+        self.assertIn('"GIT_CEILING_DIRECTORIES" to HOME', termux)
 
 
 if __name__ == "__main__":
