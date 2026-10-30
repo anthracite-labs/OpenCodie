@@ -54,6 +54,7 @@ apply_patch() {
 apply_patch opencode-android.patch
 apply_patch watcher-android.patch
 apply_patch opencode-mobile-ui.patch
+apply_patch opencode-local-csp.patch
 
 echo "==> javascript dependencies"
 cd "$UPSTREAM"
