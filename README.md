@@ -29,7 +29,10 @@ CI: `.github/workflows/build-and-release.yml` runs on PRs, `main` and version
 tags. PRs compile a debug APK for verification but do not publish it. Main
 builds and version tags require the permanent signing secret, and upload only
 `OpenCodie.apk`. GitHub Actions artifacts are ZIP downloads by design;
-version-tagged **GitHub Releases** offer the raw `OpenCodie.apk` directly.
+each signed `main` build publishes a versioned GitHub prerelease with the
+raw `OpenCodie.apk` for direct download. Matching version tags publish the
+stable release. Users should download the APK from GitHub Releases, not CI
+artifacts.
 
 The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
 (e.g. OpenCode `v2.2.2` = Android `2.2.2`). The independent Android
