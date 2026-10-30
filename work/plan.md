@@ -1,6 +1,6 @@
 # OpenCodie — Security & Reliability Implementation Plan
 
-Status: **Ready for implementation; no application fixes have been made by this plan.**  
+Status: **Code implemented and locally verified; Android device and production-release gates remain open.**
 Target: `anthracite-labs/OpenCodie` on `main`; audit baseline `fd513e8b21dfecf2b19b6cb6143934c3e452fe0f`.  
 Tracker: [todo.md](todo.md). Read the checked-out code again before changing it.
 

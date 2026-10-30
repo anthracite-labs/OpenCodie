@@ -32,8 +32,8 @@ tags. PRs compile a debug APK for verification but do not publish it. Main
 builds and version tags require the permanent signing secret, and upload only
 `OpenCodie.apk`. GitHub Actions artifacts are ZIP downloads by design;
 each signed `main` build publishes a versioned GitHub prerelease with the
-raw `OpenCodie.apk` for direct download. Matching version tags publish the
-stable release. Users should download the APK from GitHub Releases, not CI
+raw `OpenCodie.apk` for direct download. Matching version tags create a draft
+stable release for maintainer/security approval. Users should download the APK from GitHub Releases, not CI
 artifacts.
 
 The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
@@ -103,8 +103,8 @@ gh secret set OPENCODIE_SIGNING_DECRYPT_KEY < /secure/path/OPENCODIE_ENCRYPTION_
 
 Pull requests build the debug APK without release signing credentials.
 Pushes to main and release tags **require** the signing secret and produce a
-release APK signed with the stable key. To publish a GitHub Release, push a
-`v*` tag on a tested commit on main. Tagged releases **fail closed** if
+release APK signed with the stable key. To prepare a draft GitHub Release, push a
+`v*` tag on a tested commit on main; publish only after the documented release gates pass. Tagged releases **fail closed** if
 the signing secret has not been configured. Preserve the decryption key
 offline: losing it prevents signing future updates with the same key.
 
@@ -155,3 +155,5 @@ Runtime startup failures caused by recoverable I/O offer tap-to-retry. Invalid
 archives and unverified existing prefixes fail closed. Initial-install retries
 require a matching app-owned installation ID; older incomplete prefixes without
 that proof are preserved for manual recovery.
+
+See [release verification and the device matrix](docs/release-verification.md) before shipping.

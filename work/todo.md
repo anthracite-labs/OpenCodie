@@ -1,6 +1,6 @@
 # OpenCodie — Implementation Tracker
 
-Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb6143934c3e452fe0f`; recheck current `main`. All tasks start **not done**. No installed Agent Skills required: the plan contains instructions and links the [original GitHub source](https://github.com/addyosmani/agent-skills).
+Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb6143934c3e452fe0f`; recheck current `main`. Code implementation and local checks are complete; boxes remain open where device/release acceptance evidence is missing. No installed Agent Skills required: the plan contains instructions and links the [original GitHub source](https://github.com/addyosmani/agent-skills).
 
 **Task protocol:** RED failing behavior test → minimal fix → GREEN → refactor → focused + regression tests → build/device evidence → review. Only check a box after verification; note blockers and actual commands below.
 
@@ -49,7 +49,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T08 | retain approved prompt; storage link preflight | Missing StorageLinks behavior helper fails (`work/t08-red.log`) | Conflict preflight, injected partial-create rollback/idempotence, Python contracts + debug build PASS (`work/t08-build.log`) | User explicitly retained automatic prompt; API29/30+ grant/deny/retry checks require device |
 | T09 | manual migration docs | Existing malformed/custom configs covered by T01 byte-preservation tests | Manual JSON recommendation exactly matches schema-tested shipped V2 policy; backup/restore + override caveats documented | Maintainer chose manual instructions; no automatic merge/UI or config changes |
 | T10 | fixed diagnostic categories | Secret-bearing log tests fail before Diagnostics exists (`work/t10-red.log`) | Synthetic password/cookie/pair URL/API key and huge-output tests PASS; all 23 JVM tests including genuine fixture PASS; debug + Android test APKs PASS (`work/t10-genuine-build.log`) | Release WebView debugging now explicitly follows BuildConfig.DEBUG; runtime device Logcat check pending |
-| T11 | — | — | — | — |
+| T11 | release checklist + CI gates | Prior stable tag path lacked approval; changed to draft-only stable publication | Unsigned release compiles; package/min/target/version metadata verified; unsigned artifact correctly fails signature verification; trusted-only attestation workflow YAML validated | BLOCKED: physical device matrix, permanent signer, increasing production versionCode/recovery drill, live CI attestation, named maintainer/security approval |
 
 ### Execution environment — 2026-10-30
 
@@ -69,3 +69,38 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 - Action v4 refs resolved through GitHub's public git refs API; immutable commits pinned. Update digests only after independently reviewing vendor metadata/attestations and rerunning tamper tests.
 - Bootstrap now requires `gpgv` (CI installs gnupg), authenticates Packages with pinned Termux source keys, then checks each .deb SHA-256 before ar/tar. Signature execution and the real bootstrap fixture are not verified locally (no runtime archive; repository previously denied access).
 - CI saves exact Bun/Cargo lockfiles, signed Termux metadata/package inventory and runtime SHA in a separate provenance artifact, including cache hits.
+
+## Final local verification — 2026-10-30
+
+Implementation is committed on `work`; nothing was pushed or published. All executable local checks below passed. Original task/gate boxes intentionally remain open where the plan requires Android or production evidence.
+
+- **29 JVM tests, 12 suites, 0 failures/errors/skips**, with `OPENCODIE_RUNTIME_ARCHIVE` set to the genuine bundled archive. Includes config byte preservation/atomic publication, the reproduced supervisor race, refusal after uncertain shutdown, persistent process-group authorization/recovery, actual child-process timeout cleanup, upgrade and rollback faults, ZIP attacks/genuine fixture, HTTP transfer/cookie isolation, storage conflicts and diagnostics.
+- **10/10 Python contracts/integrity tests**, shell syntax, `runtime.lock` syntax, Python compile and final diff whitespace checks pass.
+- Pinned OpenCode V2 config schema and real matcher: PASS (`bun scripts/test-permissions.ts`). Actual server CSP middleware: PASS (`bun scripts/test-web-policy.ts`).
+- Isolated Chromium browser regression: baseline redirected script executes; actual CSP blocks its off-origin fetch/execution while local scripts work: PASS (`work/csp-browser.log`). Uses upstream's existing pinned Playwright dev dependency.
+- Fresh local OpenCode Android compile: PASS (`work/verified-opencode-build.log`), including independent Bun Android SHA-256 verification, native Rust build and Android ELF checks. Genuine Termux runtime generation and packaging: PASS (`work/final-runtime-build.log`); package signature/index verification retained under `dist/provenance` and reverified in `work/termux-provenance-verification.log`.
+- `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintDebug`: PASS (`work/final-verification.log`). Lint has 0 errors and 13 warnings (legacy storage/receiver/ABI/icon/path and UI strings); no lint rules were weakened.
+- Local release artifact is **unsigned**. `apksigner verify` correctly rejects it (`work/release-signature-check.log`), so it is compile evidence, not a production APK. Local versionCode is 1; no update/recovery claim is made.
+- Public permanent certificate SHA-256: `F7FB520B8FC0A76D639D4DC91CFD35E659D9396C032AAAB8601DCE877AA3BE7E`.
+- Runtime SHA-256: `25c3045b9cd54bb8ffff9968da4cffe571e37bd6b3f9ff16e1b1747d4603716e`. Runtime identity additionally hashes launcher/server bytes, so patches sharing an upstream version still update APK-owned files.
+
+### Review corrections and closure
+
+An independent code review identified direct-shell-only bootstrap termination, missing app-process-death recovery, non-atomic initial-config publication, redirected WebView resource loading, and unapproved stable tag publication. Each was addressed:
+
+- `00ec809`: durable pending/active bootstrap journal. A unique launcher acknowledgement is published only after the active group record is synced. On a new app instance, live or reused IDs are only probed, never killed; prefix mutation is refused until the old group is confirmed absent. Pending launchers without acknowledgement cannot execute package scripts. Timeouts stop the whole group and uncertain cleanup permanently blocks that in-memory supervisor.
+- `2ed637f`: fully written/synced temporary config published by atomic no-replace hard link. Existing/dangling/concurrent user configs are preserved.
+- `318a6f3`: actual server-side CSP plus pinned middleware and browser redirect tests. Android WebView compatibility remains a device gate.
+- `d22cb7c`: complete signed-runtime packaging (including correction of an existing pipefail/grep false missing-file error) and executable-based runtime identity.
+- Stable tags now create drafts. A separate trusted-only job attests the signed APK; the actual APK certificate is checked against the permanent certificate. PR jobs receive neither production signing secrets nor OIDC permission. These GitHub jobs are configured, not remotely executed in this session.
+
+The reviewer found no remaining critical journal/authorization ordering issue in the targeted re-review. This is an agent review, not the named maintainer/security sign-off required to publish stable.
+
+### Remaining release blockers
+
+1. No connected ARM64 device: instrumented smoke, API29/intermediate/API36 real-device matrix, actual WebView/picker/storage behavior, app force-stop/process-death and upgrade/recovery drill remain unrun.
+2. No permanent signing credentials: signed release certificate comparison, production update with higher versionCode and same signer remain unrun.
+3. Fresh GitHub runner/attestation jobs are not executed; NDK r28b uses Google's independently published legacy SHA-1, which needs explicit provenance/security review.
+4. Maintainer confirmation of the device matrix and named maintainer/security approval remain outstanding. Stable release stays blocked.
+
+The earlier Termux repository access blocker is resolved: curl can access signed metadata; the repository rejected urllib with error 1010, so the verifier uses the generator's supported curl client without weakening signature/digest checks. GnuPG verification uses only the pinned public keyrings (gpgv in CI; gpg with an isolated no-default-keyring home locally).

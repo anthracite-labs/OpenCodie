@@ -50,7 +50,7 @@ jobs:
             app/src/main/assets/runtime.sha256
             app/src/main/assets/runtime.version
             dist/provenance
-          key: runtime-v2-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/source-integrity.json', 'scripts/fetch_verified.py', 'scripts/verify_termux_index.py', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**', 'scripts/test-permissions.ts', 'app/src/main/assets/opencode-default.json') }}
+          key: runtime-v2-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/source-integrity.json', 'scripts/fetch_verified.py', 'scripts/verify_termux_index.py', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**', 'scripts/test-permissions.ts', 'scripts/test-web-policy.ts', 'scripts/test-web-redirects.ts', 'app/src/main/assets/opencode-default.json') }}
       - name: Install native build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -76,6 +76,8 @@ jobs:
           export PATH="$HOME/.bun/bin:$PATH"
           bash scripts/build-opencode.sh
           bun scripts/test-permissions.ts
+          bun scripts/test-web-policy.ts
+          bun scripts/test-web-redirects.ts
           bash scripts/build-runtime.sh
       - name: Save dependency provenance
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -92,7 +94,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
           with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
-              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
+              expected={"SYMLINKS.txt","bin/setsid","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
                         "etc/termux/mirrors/default",
                         "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
@@ -197,13 +199,14 @@ jobs:
           grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
           source ./runtime.lock
           grep -Fq "versionName='${OPENCODE_VERSION#v}'" "$RUNNER_TEMP/badging.txt"
+          grep -Fq "versionCode='$GITHUB_RUN_NUMBER'" "$RUNNER_TEMP/badging.txt"
           unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
           unzip -p "$APK" assets/runtime.sha256 > "$RUNNER_TEMP/runtime.sha256"
           printf '%s  %s\n' "$(cat "$RUNNER_TEMP/runtime.sha256")" "$RUNNER_TEMP/runtime.zip" | sha256sum -c -
           python3 - "$RUNNER_TEMP/runtime.zip" "$RUNNER_TEMP/opencode.bin" <<'PY'
           import sys,zipfile
           with zipfile.ZipFile(sys.argv[1]) as z:
-              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
+              required={"SYMLINKS.txt","bin/setsid","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
                         "var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (required-set(z.namelist())), required-set(z.namelist())
               with open(sys.argv[2],"wb") as out: out.write(z.read("libexec/opencode/opencode.bin"))
@@ -214,6 +217,12 @@ jobs:
             exit 1
           fi
           "$BT/apksigner" verify "$APK"
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            "$BT/apksigner" verify --print-certs "$APK" > "$RUNNER_TEMP/apk-certificate.txt"
+            actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-certificate.txt" | tr 'A-F' 'a-f')
+            expected=$(openssl x509 -in .github/signing/release-public.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+            test "$actual" = "$expected" || { echo "::error::APK signer differs from the permanent release certificate"; exit 1; }
+          fi
           sha256sum "$APK"
       - name: Prepare single signed APK
         if: github.event_name != 'pull_request'
@@ -229,9 +238,28 @@ jobs:
           path: dist/OpenCodie.apk
           if-no-files-found: error
           retention-days: 14
+  provenance:
+    name: Attest trusted signed APK
+    needs: apk
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: OpenCodie
+          path: dist-apk
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist-apk/OpenCodie.apk
+
   publish:
     name: Publish raw signed OpenCodie.apk
-    needs: apk
+    needs: [apk, provenance]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
     permissions:
@@ -256,7 +284,7 @@ jobs:
               echo "::error::Release tag must match OpenCode v$version"; exit 1;
             }
             gh release create "$GITHUB_REF_NAME" \
-              "$APK#OpenCodie.apk" --verify-tag --generate-notes
+              "$APK#OpenCodie.apk" --verify-tag --draft --generate-notes
           else
             # Direct APK downloads from Releases; Actions artifacts are always ZIPs.
             tag="v${version}-build.${GITHUB_RUN_NUMBER}"
