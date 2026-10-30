@@ -9,7 +9,9 @@ runs in that same prefix.
 ## Build
 
 ```bash
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
+python3 scripts/fetch_verified.py bun-linux-x64.zip work/bun.zip
+unzip -q work/bun.zip -d work/bun
+export PATH="$PWD/work/bun/bun-linux-x64:$PATH"
 rustup target add aarch64-linux-android
 export ANDROID_NDK_HOME=/opt/android-ndk            # NDK r28b
 bash scripts/build-release.sh                       # -> dist/OpenCodie.apk (signed)

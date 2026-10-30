@@ -41,7 +41,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T00 | local harness | Legacy Android test API failed to compile; selected supported AndroidX runner | JVM state test passes; debug + instrumentation APK compile (`work/t00-build.log`) | PARTIAL: device lane defined; no device or genuine runtime assets |
 | T01 | policy + atomic creation | Old generated config: external_directory was allow, expected ask (`work/t01-red.log`) | Pinned V2 schema/matcher PASS; config byte/symlink preservation tests + debug build PASS | Device approval/project workflow still pending |
 | T02 | exact origin + NSC | LocalOrigin trust-boundary regression fails before helper exists (`work/t02-red.log`) | Exact-origin JVM cases, debug APK and Android test APK PASS (`work/t02-build.log`) | Device pairing/upload/redirect/subresource checks pending; content access retained for picker |
-| T03 | — | — | — | — |
+| T03 | verified inputs + signed APT patch | Downloader missing; altered archive/index tests fail before verification helper | Python 10/10 PASS; shell syntax PASS; bootstrap patch applies to pinned source; genuine Bun archive verified | Fresh runtime build blocked by Termux repository access; NDK vendor publishes legacy SHA-1, stronger provenance review outstanding |
 | T04 | — | — | — | — |
 | T05 | — | — | — | — |
 | T06 | — | — | — | — |
@@ -60,3 +60,12 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 - Prior runtime generation failed: Termux package index returned HTTP 403 (`/workspace/.opencodie/runtime.log`); genuine archive verification is blocked until this input is available.
 - Gradle/adb require local sockets outside the command sandbox; build commands use the approved execution capability.
 - Maintainer decisions: retain automatic storage prompt; provide manual config migration instructions. Existing config bytes must remain unchanged.
+
+### T03 provenance sources
+
+- Bun 1.4.4 pins copied from the vendor release `SHASUMS256.txt`, fetched independently of binary bytes on 2026-10-30. Verified genuine Linux x64 archive SHA-256: `bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c`.
+- npm SHA-512 integrity comes from `bun.lock` at the pinned OpenCode commit, not live registry metadata.
+- NDK r28b digest is Google's published SHA-1 `f574d3165405bd59ffc5edaadac02689075a729f` in `repository2-3.xml`. This detects altered downloads but is a legacy algorithm; do not represent it as modern SHA-256 provenance. Stronger independent attestation remains a release gate.
+- Action v4 refs resolved through GitHub's public git refs API; immutable commits pinned. Update digests only after independently reviewing vendor metadata/attestations and rerunning tamper tests.
+- Bootstrap now requires `gpgv` (CI installs gnupg), authenticates Packages with pinned Termux source keys, then checks each .deb SHA-256 before ar/tar. Signature execution and the real bootstrap fixture are not verified locally (no runtime archive; repository previously denied access).
+- CI saves exact Bun/Cargo lockfiles, signed Termux metadata/package inventory and runtime SHA in a separate provenance artifact, including cache hits.
