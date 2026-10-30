@@ -1,0 +1,94 @@
+diff --git a/packages/session-ui/src/tools/tool-renderer.tsx b/packages/session-ui/src/tools/tool-renderer.tsx
+--- a/packages/session-ui/src/tools/tool-renderer.tsx
++++ b/packages/session-ui/src/tools/tool-renderer.tsx
+@@ -1851,9 +1851,25 @@
+ 
+ function ConsoleOutput(props: { command?: string; output: string }) {
+   const i18n = useI18n()
+-
+-  return (
+-    <div data-component="bash-output" data-variant="shell" dir="ltr">
++  const [wrap, setWrap] = createSignal(true)
++  const [expanded, setExpanded] = createSignal(false)
++
++  return (
++    <div
++      data-component="bash-output"
++      data-variant="shell"
++      data-wrap={wrap() ? "true" : "false"}
++      data-expanded={expanded() ? "true" : "false"}
++      dir="ltr"
++    >
++      <div data-slot="bash-view-options">
++        <button type="button" aria-pressed={wrap()} onClick={() => setWrap(!wrap())}>
++          {wrap() ? "Wrap on" : "Wrap off"}
++        </button>
++        <button type="button" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>
++          {expanded() ? i18n.t("ui.message.collapse") : i18n.t("ui.message.expand")}
++        </button>
++      </div>
+       <div
+         data-slot="bash-scroll"
+         data-scrollable
+diff --git a/packages/session-ui/src/components/message-part.css b/packages/session-ui/src/components/message-part.css
+--- a/packages/session-ui/src/components/message-part.css
++++ b/packages/session-ui/src/components/message-part.css
+@@ -1820,3 +1820,58 @@
+   color: var(--v2-text-text-muted);
+   transition: none;
+ }
++
++/* OpenCodie: phone-sized shell output; the desktop UI stays unchanged. */
++[data-component="bash-output"] [data-slot="bash-view-options"] {
++  display: none;
++}
++
++@media (max-width: 640px) {
++  [data-component="bash-output"][data-variant="shell"] {
++    [data-slot="bash-view-options"] {
++      display: flex;
++      justify-content: flex-end;
++      gap: 8px;
++      padding: 6px 8px;
++      border-bottom: 1px solid var(--v2-border-border-base);
++    }
++
++    [data-slot="bash-view-options"] button {
++      min-height: 36px;
++      padding: 0 10px;
++      border: 1px solid var(--v2-border-border-base);
++      border-radius: 6px;
++      background: var(--v2-background-bg-layer-01);
++      color: var(--v2-text-text-base);
++      font: inherit;
++    }
++
++    [data-slot="bash-view-options"] button:focus-visible {
++      outline: 2px solid currentColor;
++      outline-offset: 2px;
++    }
++
++    [data-slot="bash-scroll"] {
++      max-height: min(55dvh, 440px);
++      overscroll-behavior: contain;
++    }
++
++    &[data-expanded="true"] [data-slot="bash-scroll"] {
++      max-height: 75dvh;
++    }
++
++    &[data-wrap="false"] [data-slot="bash-scroll"] {
++      overflow-x: auto;
++    }
++
++    &[data-wrap="false"] [data-slot="bash-pre"] code {
++      white-space: pre;
++      overflow-wrap: normal;
++    }
++
++    [data-slot="bash-pre"] code {
++      font-size: 14px;
++      line-height: 1.5;
++    }
++  }
++}
