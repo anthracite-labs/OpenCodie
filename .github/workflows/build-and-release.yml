@@ -26,6 +26,7 @@ jobs:
           for file in scripts/*.sh; do bash -n "$file"; done
           bash -n runtime.lock
           python3 -m py_compile scripts/*.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
           python3 - <<'PY'
           from pathlib import Path
           import re,xml.etree.ElementTree as ET
@@ -75,7 +76,8 @@ jobs:
           python3 - <<'PY'
           import zipfile
           with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
-              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/rg",
+              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg",
+                        "etc/termux/mirrors/default",
                         "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
               assert z.testzip() is None
@@ -151,30 +153,39 @@ jobs:
             echo "OPENCODIE_KEY_PASSWORD=$pass"
           } >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"
-      - name: Assemble release and debug APKs
+      - name: Assemble APK
         env:
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon :app:assembleRelease :app:assembleDebug
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            ./gradlew --no-daemon :app:assembleDebug
+          else
+            ./gradlew --no-daemon :app:assembleRelease
+          fi
       - name: Verify package, target SDK and runtime
         run: |
           set -euo pipefail
-          APK=app/build/outputs/apk/release/app-release.apk
-          if [ ! -f "$APK" ]; then APK=app/build/outputs/apk/release/app-release-unsigned.apk; fi
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            APK=app/build/outputs/apk/debug/app-debug.apk
+          else
+            APK=app/build/outputs/apk/release/app-release.apk
+          fi
           test -s "$APK"
           BT="$ANDROID_HOME/build-tools/36.0.0"
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
           grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
           grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
+          source ./runtime.lock
+          grep -Fq "versionName='${OPENCODE_VERSION#v}'" "$RUNNER_TEMP/badging.txt"
           unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
           unzip -p "$APK" assets/runtime.sha256 > "$RUNNER_TEMP/runtime.sha256"
           printf '%s  %s\n' "$(cat "$RUNNER_TEMP/runtime.sha256")" "$RUNNER_TEMP/runtime.zip" | sha256sum -c -
           python3 - "$RUNNER_TEMP/runtime.zip" "$RUNNER_TEMP/opencode.bin" <<'PY'
           import sys,zipfile
           with zipfile.ZipFile(sys.argv[1]) as z:
-              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/rg",
+              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/git","bin/rg",
                         "var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (required-set(z.namelist())), required-set(z.namelist())
               with open(sys.argv[2],"wb") as out: out.write(z.read("libexec/opencode/opencode.bin"))
@@ -184,38 +195,55 @@ jobs:
             echo "::error::Non-Android libc linked"
             exit 1
           fi
-          if [ -n "$OPENCODIE_KEYSTORE_FILE" ]; then
-            "$BT/apksigner" verify "$APK"
-          fi
+          "$BT/apksigner" verify "$APK"
           sha256sum "$APK"
-        env:
-          OPENCODIE_KEYSTORE_FILE: ${{ env.OPENCODIE_KEYSTORE_FILE }}
-      - name: Upload APKs
+      - name: Prepare single signed APK
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          install -m 644 app/build/outputs/apk/release/app-release.apk dist/OpenCodie.apk
+      - name: Upload OpenCodie APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: opencodie-apk
-          path: app/build/outputs/apk/**/*.apk
+          name: OpenCodie
+          path: dist/OpenCodie.apk
           if-no-files-found: error
           retention-days: 14
   publish:
-    name: Publish signed GitHub release
+    name: Publish raw signed OpenCodie.apk
     needs: apk
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: opencodie-apk
+          name: OpenCodie
           path: dist-apk
       - name: Publish verified signed APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          APK="$(find dist-apk -type f -name 'app-release.apk' -print -quit)"
-          test -n "$APK" && test -s "$APK"
-          gh release create "$GITHUB_REF_NAME" \
-            "$APK#OpenCodie-$GITHUB_REF_NAME-arm64.apk" \
-            --verify-tag --generate-notes
+          source ./runtime.lock
+          version="${OPENCODE_VERSION#v}"
+          APK=dist-apk/OpenCodie.apk
+          test -s "$APK"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version" || {
+              echo "::error::Release tag must match OpenCode v$version"; exit 1;
+            }
+            gh release create "$GITHUB_REF_NAME" \
+              "$APK#OpenCodie.apk" --verify-tag --generate-notes
+          else
+            # Direct APK downloads from Releases; Actions artifacts are always ZIPs.
+            tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+            gh release create "$tag" \
+              "$APK#OpenCodie.apk" --target "$GITHUB_SHA" \
+              --title "OpenCodie v$version (build $GITHUB_RUN_NUMBER)" \
+              --prerelease --generate-notes
+          fi

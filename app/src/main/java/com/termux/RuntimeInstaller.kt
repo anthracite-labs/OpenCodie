@@ -60,6 +60,7 @@ object RuntimeInstaller {
             installing.writeText("$bundled\n")
             bootstrap(context, prefix, staging, log)
             ensureDirectories(prefix)
+            selectDefaultMirror(prefix)
             runSecondStage(prefix, log)
             writeOpenCodeConfig(log)
             writeVersion(prefix, bundled)
@@ -82,6 +83,15 @@ object RuntimeInstaller {
         ensureDirectories(prefix)
         writeOpenCodeConfig(log)
         log("Runtime $bundled ready")
+    }
+
+    /** Select the stock Termux origin mirror before the first pkg call. */
+    private fun selectDefaultMirror(prefix: File) {
+        val mirrors = File(prefix, "etc/termux/mirrors")
+        val default = File(mirrors, "default")
+        check(default.isFile) { "Bundled Termux default mirror is missing" }
+        val selected = File(prefix, "etc/termux/chosen_mirrors")
+        if (!selected.exists()) Os.symlink(default.path, selected.path)
     }
 
     private fun ensureDirectories(prefix: File) {
@@ -289,6 +299,22 @@ object RuntimeInstaller {
 
     /** Initial OpenCode configuration; later user edits are preserved. */
     private fun writeOpenCodeConfig(log: (String) -> Unit) {
+        // Stock OpenCode global instructions; never overwrite the user's edits.
+        val instructions = File(Termux.HOME, ".config/opencode/AGENTS.md")
+        if (!instructions.exists()) {
+            instructions.parentFile?.mkdirs()
+            instructions.writeText(
+                """
+                # OpenCodie Android environment
+
+                - This is native Termux on Android. Use pkg, never sudo, to install Termux packages.
+                - The OpenCode shell tool is noninteractive: use `pkg install -y PACKAGE` for requested installs. Never claim success before checking the exit status.
+                - Create Git repositories inside named project directories under ~/projects; never initialize Git in ~ or ~/projects itself.
+                - If a long-running command is backgrounded, verify its eventual outcome before reporting success.
+                """.trimIndent() + "\n",
+            )
+            log("Wrote ${instructions.path}")
+        }
         val config = File(Termux.HOME, ".config/opencode/opencode.json")
         if (config.exists()) return
         config.parentFile?.mkdirs()

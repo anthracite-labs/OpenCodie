@@ -12,7 +12,7 @@ runs in that same prefix.
 curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
 rustup target add aarch64-linux-android
 export ANDROID_NDK_HOME=/opt/android-ndk            # NDK r28b
-bash scripts/build-release.sh                       # -> app/build/outputs/apk/release/*.apk
+bash scripts/build-release.sh                       # -> dist/OpenCodie.apk (signed)
 ```
 
 Requirements: Linux x86_64, JDK 17, Android SDK (compileSdk 37), Bun 1.4.4,
@@ -25,10 +25,18 @@ WebUI embedded), `scripts/build-runtime.sh` (Termux bootstrap + OpenCode,
 packaged as `runtime-aarch64.zip` and embedded in the APK),
 `scripts/build-release.sh` (both, then `./gradlew --no-daemon :app:assembleRelease`).
 
-CI: the **android** workflow runs on pull requests, pushes to `main`, and manual dispatch,
-builds the whole pipeline, verifies the APK (package id, SDK levels, ABI,
-embedded runtime, signature) and uploads `opencodie-apk` plus
-`opencodie-build-log`.
+CI: `.github/workflows/build-and-release.yml` runs on PRs, `main` and version
+tags. PRs compile a debug APK for verification but do not publish it. Main
+builds and version tags require the permanent signing secret, and upload only
+`OpenCodie.apk`. GitHub Actions artifacts are ZIP downloads by design;
+each signed `main` build publishes a versioned GitHub prerelease with the
+raw `OpenCodie.apk` for direct download. Matching version tags publish the
+stable release. Users should download the APK from GitHub Releases, not CI
+artifacts.
+
+The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
+(e.g. OpenCode `v2.2.2` = Android `2.2.2`). The independent Android
+`versionCode` increases per CI build so updates are installable.
 
 ## Install
 
@@ -37,6 +45,14 @@ embedded runtime, signature) and uploads `opencodie-apk` plus
   identity and allows executing binaries from the app's private data directory.
   It cannot coexist with another app signed with a different key under the same
   package name; uninstall an existing `com.termux` app first.
+- The default workspace is `~/projects/workspace`, not the Termux home directory.
+  The bundled bootstrap includes Git for project initialization on first launch,
+  and selects the official Termux default package mirror rather than scanning
+  worldwide mirrors on every `pkg install`.
+  New installations start in `~/projects/workspace` so the Git button
+  creates a project repository, not a Git repository over the whole home directory.
+  OpenCode's shell tool is noninteractive; when requesting package installation,
+  use `pkg install -y <package>` to avoid the confirmation prompt.
 - First launch extracts the bundled runtime (no network). An app-owned
   completion marker is created **after** the Termux second stage succeeds;
   interrupted fresh installations retry from clean bundled files. An APK upgrade
@@ -84,8 +100,15 @@ management and upgrade behavior on an Android device.
 - OpenCode's native file finder (fff) has no bionic build here, so
   `OPENCODE_DISABLE_FFF=1` selects the ripgrep backend.
 - `arm64-v8a` only.
-- Device behaviour (WebUI, terminal, `pkg install`, upgrade persistence) has not
-  been exercised on hardware from this environment.
+- WebUI and native Termux package installation have been observed on an ARM64
+  Android 16 device. Upgrade persistence and all interactive PTY operations
+  still require device-level regression testing.
+- **Play Protect:** a valid APK signature does not make a sideloaded app
+  automatically trusted by Google. Unknown-app scanning and old-target warnings
+  may appear because this build intentionally retains `targetSdk 28` for
+  Termux execution. Do not disable Play Protect as a workaround; inspect the
+  exact warning, verify the APK's signing certificate and distribute from a
+  trusted release channel.
 
 ## Credits
 
