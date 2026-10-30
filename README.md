@@ -53,14 +53,17 @@ The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
   creates a project repository, not a Git repository over the whole home directory.
   OpenCode's shell tool is noninteractive; when requesting package installation,
   use `pkg install -y <package>` to avoid the confirmation prompt.
-- Shared Android storage is opt-in: run `termux-setup-storage` from the OpenCode
-  terminal or shell. On Android 10 the app requests the legacy storage permission;
-  on Android 11+ it opens Android's **All files access** settings. Once granted,
-  `~/storage/shared`, `~/storage/downloads`, `~/storage/documents` and the
-  other standard Termux links are created. Re-running setup preserves existing
-  files and custom links instead of deleting them. Android-protected paths such
-  as other apps' `Android/data` directories remain inaccessible. The native
-  file picker remains available without broad storage access.
+- On the first launch, after the bundled Termux runtime finishes its bootstrap,
+  OpenCodie automatically asks for Android storage access: a permission prompt
+  on Android 10 or the **All files access** settings screen on Android 11+.
+  The user can decline; the WebUI still works and is not blocked. Permission is
+  requested automatically only once per install, not on every launch.
+  After approval, `~/storage/shared`, `~/storage/downloads`,
+  `~/storage/documents` and other standard Termux links are created without
+  deleting user files. If permission was declined, `termux-setup-storage`
+  explicitly retries the request. Android-protected areas such as other apps'
+  `Android/data` remain restricted. The native file picker remains usable
+  without broad storage access.
 - First launch extracts the bundled runtime (no network). An app-owned
   completion marker is created **after** the Termux second stage succeeds;
   interrupted fresh installations retry from clean bundled files. An APK upgrade

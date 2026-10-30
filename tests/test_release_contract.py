@@ -34,6 +34,19 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('white-space: pre;', patch)
         self.assertIn("settings.textZoom =", activity)
 
+    def test_storage_permission_is_requested_automatically_after_bootstrap(self):
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+
+        # Initial bootstrap's ready marker is written only after second-stage setup.
+        self.assertIn('private const val READY_FILE = ".opencodie-ready"', installer)
+        self.assertIn('File(filesDir, ".opencodie-ready").isFile', activity)
+        self.assertIn('getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)', activity)
+        self.assertIn('putBoolean("storage_prompted", true).commit()', activity)
+        self.assertIn('if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return', activity)
+        self.assertIn('maybeRequestBootstrapStorage()', activity.split("private fun poll()", 1)[1])
+        self.assertIn('requestStorageAccess()', activity.split("private fun maybeRequestBootstrapStorage()", 1)[1])
+
     def test_termux_setup_storage_bridge(self):
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
         activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
