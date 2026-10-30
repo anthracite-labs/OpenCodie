@@ -29,7 +29,8 @@ object Termux {
         "TERMUX__HOME" to HOME,
         "TERMUX__PREFIX" to PREFIX,
         "TERMUX__CACHE_DIR" to CACHE,
-        "TERMUX__USER_ID" to uid.toString(),
+        // Android user/profile ID, not Linux app UID (used by termux-setup-storage --user).
+        "TERMUX__USER_ID" to (uid / 100_000).toString(),
         "TERMUX_APP__PACKAGE_NAME" to "com.termux",
         "TERMUX_APP__DATA_DIR" to DATA_DIR,
         "TERMUX_APP_PACKAGE_MANAGER" to "apt",
