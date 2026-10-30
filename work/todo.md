@@ -44,7 +44,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T03 | verified inputs + signed APT patch | Downloader missing; altered archive/index tests fail before verification helper | Python 10/10 PASS; shell syntax PASS; bootstrap patch applies to pinned source; genuine Bun archive verified | Fresh runtime build blocked by Termux repository access; NDK vendor publishes legacy SHA-1, stronger provenance review outstanding |
 | T04 | serial owner | Deterministic old-owner/stop/start test fails: requested restart lost (`work/t04-red.log`) | Shutdown acknowledgment/idempotence JVM tests + integrated debug build PASS (`work/t04-build.log`) | Child cleanup fails closed; real device process crash/stress remains pending |
 | T05 | owned initial install + transactional upgrade | Missing behavioral recovery helpers fail (`work/t05-red.log`); prior rollback restored binary before launcher, losing recovery journal | 8 upgrade fault points, rollback retry, unknown-prefix preservation, no-follow deletion and real stalled process deadline PASS; debug build PASS (`work/t05-build.log`) | Tap-to-retry for recoverable bootstrap I/O only; on-device install/upgrade still pending |
-| T06 | — | — | — | — |
+| T06 | bounded no-follow staging extraction | Malicious ZIP helper regressions fail before extractor exists (`work/t06-red.log`) | Traversal, duplicate/type collision, link cycle/parent/target, actual size/count fixtures PASS; debug build PASS (`work/t06-build.log`) | Genuine fixture gate added to CI; local genuine archive absent, so its test is explicitly skipped |
 | T07 | — | — | — | — |
 | T08 | — | — | — | — |
 | T09 | — | — | — | — |

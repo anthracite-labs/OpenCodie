@@ -170,7 +170,7 @@ jobs:
           } >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"
       - name: JVM behavioral tests and instrumentation compilation
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebugAndroidTest
+        run: OPENCODIE_RUNTIME_ARCHIVE="$PWD/app/src/main/assets/runtime-aarch64.zip" ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebugAndroidTest
       - name: Assemble APK
         env:
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}

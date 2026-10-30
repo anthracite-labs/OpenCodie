@@ -3,11 +3,8 @@ package com.termux
 import android.content.Context
 import android.os.Process
 import android.system.Os
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.zip.ZipInputStream
 
 /**
  * Provisioning of the Termux userspace bundled in the APK.
@@ -43,6 +40,7 @@ object RuntimeInstaller {
         val installed = ready.takeIf { it.isFile }?.readText()?.trim()
 
         if (installed == null) {
+            verifyChecksum(context)
             val installId = InitialInstall(files).prepare()
             bootstrap(context, prefix, staging, installId, log)
             ensureDirectories(prefix)
@@ -90,11 +88,9 @@ object RuntimeInstaller {
     private fun writeMarker(marker: File, version: String) = FileOps.writeAtomic(marker, "$version\n")
 
     private fun bootstrap(context: Context, prefix: File, staging: File, installId: String, log: (String) -> Unit) {
-        verifyChecksum(context)
         FileOps.removeTree(staging)
         try {
             val symlinks = extract(context, staging) { true }
-            check(symlinks.isNotEmpty()) { "Runtime archive has no SYMLINKS.txt" }
             for ((target, link) in symlinks) {
                 File(link).parentFile?.mkdirs()
                 Os.symlink(target, link)
@@ -126,71 +122,12 @@ object RuntimeInstaller {
         RuntimeUpgrade(files, prefix).recover(committed, File(files, READY_FILE).readText().trim())
     }
 
-    /**
-     * Extracts [keep] entries of the bundled archive into [destination] and
-     * returns the symlinks recorded by the archive.
-     */
-    private fun extract(context: Context, destination: File, keep: (String) -> Boolean): List<Pair<String, String>> {
-        val symlinks = ArrayList<Pair<String, String>>()
-        val buffer = ByteArray(64 * 1024)
-        context.assets.open(ZIP).use { asset ->
-            ZipInputStream(asset.buffered(1 shl 16)).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    val name = entry.name
-                    // All extraction and symlink destinations must stay inside staging.
-                    // A valid checksum alone does not make ZIP paths safe.
-                    if (name != "SYMLINKS.txt") safePath(destination, name)
-                    if (name == "SYMLINKS.txt") {
-                        val text = ByteArrayOutputStream()
-                        while (true) {
-                            val read = zip.read(buffer)
-                            if (read < 0) break
-                            text.write(buffer, 0, read)
-                        }
-                        for (line in text.toString("UTF-8").lines().filter { it.isNotBlank() }) {
-                            val parts = line.split('←')
-                            check(parts.size == 2) { "Malformed symlink line: $line" }
-                            symlinks += parts[0] to safePath(destination, parts[1].removePrefix("./")).path
-                        }
-                    } else if (keep(name)) {
-                        val target = safePath(destination, name)
-                        if (entry.isDirectory) {
-                            target.mkdirs()
-                        } else {
-                            target.parentFile?.mkdirs()
-                            FileOutputStream(target).use { out ->
-                                while (true) {
-                                    val read = zip.read(buffer)
-                                    if (read < 0) break
-                                    out.write(buffer, 0, read)
-                                }
-                            }
-                            if (name.startsWith("bin/") || name.startsWith("libexec/") ||
-                                name.startsWith("lib/apt/apt-helper") || name.startsWith("lib/apt/methods")
-                            ) {
-                                Os.chmod(target.path, EXEC_MODE)
-                            }
-                        }
-                    }
-                    zip.closeEntry()
-                }
-            }
+    private fun extract(context: Context, destination: File, keep: (String) -> Boolean): List<Pair<String, String>> =
+        try {
+            context.assets.open(ZIP).use { RuntimeArchive.extract(it, destination, keep) }
+        } catch (error: java.io.IOException) {
+            throw IllegalStateException("Unsafe or unreadable bundled runtime archive", error)
         }
-        return symlinks
-    }
-
-    private fun safePath(root: File, name: String): File {
-        check(!name.startsWith("/") && name.split('/').none { it == ".." }) {
-            "Unsafe runtime archive path: $name"
-        }
-        val canonicalRoot = root.canonicalFile
-        val result = File(root, name).canonicalFile
-        check(result == canonicalRoot || result.path.startsWith(canonicalRoot.path + File.separator)) {
-            "Runtime archive path leaves staging: $name"
-        }
-        return result
-    }
 
     /** SHA-256 of the bundled archive against the checksum written at build time. */
     private fun verifyChecksum(context: Context) {
