@@ -62,7 +62,7 @@ object RuntimeInstaller {
             ensureDirectories(prefix)
             selectDefaultMirror(prefix)
             runSecondStage(prefix, log)
-            writeOpenCodeConfig(log)
+            writeOpenCodeConfig(context, log)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
@@ -81,7 +81,7 @@ object RuntimeInstaller {
             clearUpgradeBackup(files)
         }
         ensureDirectories(prefix)
-        writeOpenCodeConfig(log)
+        writeOpenCodeConfig(context, log)
         log("Runtime $bundled ready")
     }
 
@@ -298,7 +298,7 @@ object RuntimeInstaller {
     }
 
     /** Initial OpenCode configuration; later user edits are preserved. */
-    private fun writeOpenCodeConfig(log: (String) -> Unit) {
+    private fun writeOpenCodeConfig(contextForConfig: Context, log: (String) -> Unit) {
         // Stock OpenCode global instructions; never overwrite the user's edits.
         val instructions = File(Termux.HOME, ".config/opencode/AGENTS.md")
         if (!instructions.exists()) {
@@ -316,25 +316,7 @@ object RuntimeInstaller {
             log("Wrote ${instructions.path}")
         }
         val config = File(Termux.HOME, ".config/opencode/opencode.json")
-        if (config.exists()) return
-        config.parentFile?.mkdirs()
-        config.writeText(
-            """
-            {
-              "${'$'}schema": "https://opencode.ai/config.json",
-              "shell": "${Termux.PREFIX}/bin/bash",
-              "permissions": [
-                {
-                  "action": "shell",
-                  "resource": "*",
-                  "effect": "ask"
-                }
-              ],
-              "update": "disable"
-            }
-
-            """.trimIndent(),
-        )
+        if (!InitialConfig.writeIfAbsent(config, asset(contextForConfig, "opencode-default.json"))) return
         log("Wrote ${config.path}")
     }
 

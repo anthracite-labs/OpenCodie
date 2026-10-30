@@ -49,7 +49,7 @@ jobs:
             app/src/main/assets/runtime-aarch64.zip
             app/src/main/assets/runtime.sha256
             app/src/main/assets/runtime.version
-          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
+          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**', 'scripts/test-permissions.ts', 'app/src/main/assets/opencode-default.json') }}
       - name: Install native build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -71,6 +71,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.bun/bin:$PATH"
           bash scripts/build-opencode.sh
+          bun scripts/test-permissions.ts
           bash scripts/build-runtime.sh
       - name: Verify prepared runtime
         run: |
