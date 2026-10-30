@@ -1,0 +1,23 @@
+--- a/packages/server/src/process.ts
++++ b/packages/server/src/process.ts
+@@ -37,6 +37,12 @@
+ >
+ 
+ export type Transform = (app: App) => App
++
++// Android WebView interception does not see redirected subresources. CSP checks every redirect.
++export const localContentSecurity = HttpMiddleware.make((app) =>
++  Effect.map(app, (response) => HttpServerResponse.setHeader(response, "content-security-policy",
++    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws://127.0.0.1:4096; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'")),
++)
+ 
+ const errorResponseLogger = HttpMiddleware.make((app) =>
+   HttpMiddleware.logger(
+@@ -72,6 +78,7 @@
+   yield* bound.http
+     .serve(
+       (transform ? transform(app) : app).pipe(
++        localContentSecurity,
+         HttpMiddleware.compression(),
+         HttpMiddleware.cors({ allowedOrigins: (origin) => isAllowedCorsOrigin(origin, options), maxAge: 86_400 }),
+       ),

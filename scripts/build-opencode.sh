@@ -54,6 +54,7 @@ apply_patch() {
 apply_patch opencode-android.patch
 apply_patch watcher-android.patch
 apply_patch opencode-mobile-ui.patch
+apply_patch opencode-local-csp.patch
 
 echo "==> javascript dependencies"
 cd "$UPSTREAM"
@@ -71,9 +72,10 @@ ensure_npm_package() {
         return 0
     fi
     echo "fetching $name@$version from npm"
+    local archive="$WORK/$(basename "$name")-$version.tgz"
+    python3 "$REPO_ROOT/scripts/fetch_verified.py" "$name" "$archive"
     mkdir -p "$flat"
-    curl -fsSL "https://registry.npmjs.org/$name/-/$(basename "$name")-$version.tgz" |
-        tar xz -C "$flat" --strip-components=1
+    tar xzf "$archive" -C "$flat" --strip-components=1
 }
 ensure_npm_package "@parcel/watcher-android-arm64" "$PARCEL_WATCHER_VERSION"
 ensure_npm_package "@opencode/pty-linux-arm64-musl" "$PTY_VERSION"
@@ -85,6 +87,11 @@ echo "==> compile (WebUI embedded)"
 export BUN_COMPILE_RELEASE OPENCODE_CHANNEL=latest
 export OPENCODE_VERSION="${OPENCODE_VERSION#v}"
 export GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+# Pre-seed Bun's compile cache from an independently pinned archive, replacing stale cache bytes.
+COMPILE_CACHE="$DIST/cli/.bun/$BUN_COMPILE_RELEASE"
+python3 "$REPO_ROOT/scripts/fetch_verified.py" bun-linux-aarch64-android.zip "$WORK/bun-android.zip"
+mkdir -p "$COMPILE_CACHE"
+unzip -oq "$WORK/bun-android.zip" -d "$COMPILE_CACHE"
 cd "$UPSTREAM/packages/cli"
 bun run script/build.ts \
     --target=opencode-linux-arm64-android \

@@ -9,7 +9,9 @@ runs in that same prefix.
 ## Build
 
 ```bash
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"
+python3 scripts/fetch_verified.py bun-linux-x64.zip work/bun.zip
+unzip -q work/bun.zip -d work/bun
+export PATH="$PWD/work/bun/bun-linux-x64:$PATH"
 rustup target add aarch64-linux-android
 export ANDROID_NDK_HOME=/opt/android-ndk            # NDK r28b
 bash scripts/build-release.sh                       # -> dist/OpenCodie.apk (signed)
@@ -30,8 +32,8 @@ tags. PRs compile a debug APK for verification but do not publish it. Main
 builds and version tags require the permanent signing secret, and upload only
 `OpenCodie.apk`. GitHub Actions artifacts are ZIP downloads by design;
 each signed `main` build publishes a versioned GitHub prerelease with the
-raw `OpenCodie.apk` for direct download. Matching version tags publish the
-stable release. Users should download the APK from GitHub Releases, not CI
+raw `OpenCodie.apk` for direct download. Matching version tags create a draft
+stable release for maintainer/security approval. Users should download the APK from GitHub Releases, not CI
 artifacts.
 
 The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
@@ -101,8 +103,8 @@ gh secret set OPENCODIE_SIGNING_DECRYPT_KEY < /secure/path/OPENCODIE_ENCRYPTION_
 
 Pull requests build the debug APK without release signing credentials.
 Pushes to main and release tags **require** the signing secret and produce a
-release APK signed with the stable key. To publish a GitHub Release, push a
-`v*` tag on a tested commit on main. Tagged releases **fail closed** if
+release APK signed with the stable key. To prepare a draft GitHub Release, push a
+`v*` tag on a tested commit on main; publish only after the documented release gates pass. Tagged releases **fail closed** if
 the signing secret has not been configured. Preserve the decryption key
 offline: losing it prevents signing future updates with the same key.
 
@@ -137,3 +139,21 @@ The Android build pipeline (`scripts/check-elf.sh`, `scripts/patch-opentui-loade
 adapted from [Astreele/opencode-android](https://github.com/Astreele/opencode-android)
 (MIT). OpenCode, Termux packages and Bun are used unmodified where noted in
 `runtime.lock`.
+
+## Security policy and verification
+
+New installs ask for shell and external-directory access and protect sensitive
+read/edit paths. Existing configurations are preserved byte-for-byte; see the
+[optional manual configuration update](docs/configuration.md). Permission approval
+is not a filesystem sandbox, especially after shared storage is granted.
+
+Downloads stay on the authenticated loopback origin, use bounded transfers and
+keep each picker result tied to its own request. Tap the saving notice to cancel;
+failed partial documents are removed when the provider permits it.
+
+Runtime startup failures caused by recoverable I/O offer tap-to-retry. Invalid
+archives and unverified existing prefixes fail closed. Initial-install retries
+require a matching app-owned installation ID; older incomplete prefixes without
+that proof are preserved for manual recovery.
+
+See [release verification and the device matrix](docs/release-verification.md) before shipping.

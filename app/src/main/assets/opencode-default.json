@@ -1,0 +1,77 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "shell": "/data/data/com.termux/files/usr/bin/bash",
+  "permissions": [
+    {
+      "action": "shell",
+      "resource": "*",
+      "effect": "ask"
+    },
+    {
+      "action": "external_directory",
+      "resource": "*",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.env",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.env.*",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.ssh/*",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.aws/*",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.config/opencode/auth.json",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.env.example",
+      "effect": "allow"
+    },
+    {
+      "action": "edit",
+      "resource": "*.env",
+      "effect": "ask"
+    },
+    {
+      "action": "edit",
+      "resource": "*.env.*",
+      "effect": "ask"
+    },
+    {
+      "action": "edit",
+      "resource": "*.ssh/*",
+      "effect": "ask"
+    },
+    {
+      "action": "edit",
+      "resource": "*.aws/*",
+      "effect": "ask"
+    },
+    {
+      "action": "edit",
+      "resource": "*.config/opencode/auth.json",
+      "effect": "ask"
+    },
+    {
+      "action": "edit",
+      "resource": "*.env.example",
+      "effect": "allow"
+    }
+  ],
+  "update": "disable"
+}

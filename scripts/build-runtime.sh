@@ -15,7 +15,7 @@ ASSETS="$REPO_ROOT/app/src/main/assets"
 STAGE="$WORK/runtime/rootfs"
 BOOTSTRAP="$WORK/bootstrap-aarch64.zip"
 BOOTSTRAP_KEY="$WORK/bootstrap-aarch64.inputs"
-EXPECTED_INPUTS="$TERMUX_BOOTSTRAP_COMMIT:$TERMUX_BOOTSTRAP_PACKAGES"
+EXPECTED_INPUTS="$TERMUX_BOOTSTRAP_COMMIT:$TERMUX_BOOTSTRAP_PACKAGES:signed-apt-v1"
 ARCHIVE="$REPO_ROOT/runtime-aarch64.zip"
 
 test -x "$DIST/opencode/opencode" && test -x "$DIST/opencode/opencode.bin" || {
@@ -38,6 +38,12 @@ if [ ! -f "$BOOTSTRAP" ] || [ "$(cat "$BOOTSTRAP_KEY" 2>/dev/null || true)" != "
         echo "wrong termux-packages revision" >&2
         exit 1
     }
+    if ! git -C "$TERMUX" apply --reverse --check "$REPO_ROOT/patches/termux-bootstrap-integrity.patch" 2>/dev/null; then
+        git -C "$TERMUX" apply "$REPO_ROOT/patches/termux-bootstrap-integrity.patch"
+    fi
+    export OPENCODIE_APT_VERIFIER="$REPO_ROOT/scripts/verify_termux_index.py"
+    export OPENCODIE_TERMUX_KEYS="$TERMUX/packages/termux-keyring"
+    export OPENCODIE_PROVENANCE="$DIST/provenance"
     (
         cd "$TERMUX"
         ./scripts/generate-bootstraps.sh \
@@ -62,8 +68,8 @@ echo "==> archive"
 rm -f "$ARCHIVE"
 (cd "$STAGE" && zip -r -9 -q "$ARCHIVE" ./*)
 
-for expected in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
-    unzip -l "$ARCHIVE" | grep -q " $expected\$" || {
+for expected in bin/setsid bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
+    unzip -l "$ARCHIVE" | grep " $expected\$" >/dev/null || {
         echo "runtime is missing $expected" >&2
         exit 1
     }
@@ -73,6 +79,24 @@ echo "==> embed in APK assets"
 mkdir -p "$ASSETS"
 cp "$ARCHIVE" "$ASSETS/runtime-aarch64.zip"
 sha256sum "$ARCHIVE" | cut -d' ' -f1 >"$ASSETS/runtime.sha256"
-printf '%s\n' "$OPENCODE_VERSION" >"$ASSETS/runtime.version"
+# Include both APK-owned executable digests so patches with the same upstream version upgrade too.
+RUNTIME_ID=$(python3 - "$DIST/opencode/opencode" "$DIST/opencode/opencode.bin" <<'PYID'
+import hashlib,sys
+h=hashlib.sha256()
+for path in sys.argv[1:]:
+    with open(path,'rb') as source:
+        while chunk:=source.read(1024*1024): h.update(chunk)
+print(h.hexdigest())
+PYID
+)
+printf '%s:%s\n' "$OPENCODE_VERSION" "$RUNTIME_ID" >"$ASSETS/runtime.version"
 ls -lh "$ARCHIVE" "$ASSETS/runtime-aarch64.zip"
 cat "$ASSETS/runtime.sha256"
+
+# Preserve exact dependency inputs and runtime component inventory for review.
+mkdir -p "$DIST/provenance"
+cp "$REPO_ROOT/runtime.lock" "$REPO_ROOT/scripts/source-integrity.json" "$DIST/provenance/"
+cp "$WORK/opencode-$OPENCODE_VERSION/bun.lock" "$DIST/provenance/opencode-bun.lock"
+cp "$WORK/bun-pty-$BUN_PTY_VERSION/rust-pty/Cargo.lock" "$DIST/provenance/bun-pty-Cargo.lock"
+cp "$STAGE/var/lib/dpkg/status" "$DIST/provenance/termux-packages.txt"
+sha256sum "$ARCHIVE" > "$DIST/provenance/runtime.sha256"

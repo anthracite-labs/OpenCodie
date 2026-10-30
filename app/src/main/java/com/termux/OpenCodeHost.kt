@@ -30,80 +30,85 @@ object OpenCodeHost {
     @Volatile var status = "Starting"
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
+    @Volatile var retryAvailable = false
 
-    private var supervisor: Thread? = null
+    private var appContext: Context? = null
+    private val supervisor = HostSupervisor(
+        onCrash = { fail("Supervisor stopped unexpectedly; restart OpenCodie", IllegalStateException("Supervisor worker failed")) },
+    ) { token -> supervise(checkNotNull(appContext), token) }
 
-    @Volatile private var stopping = false
-    @Volatile private var process: Process? = null
     private var password: String = ""
     private val output = StringBuilder()
 
-    /** Starts the supervisor once; repeated calls (service restarts) are ignored. */
+    /** Start/stop return promptly; the old thread acknowledges shutdown before replacement. */
     @Synchronized
     fun start(context: Context) {
-        if (supervisor?.isAlive == true) return
-        stopping = false
-        val app = context.applicationContext
-        supervisor = Thread { supervise(app) }.apply {
-            isDaemon = true
-            start()
-        }
+        appContext = context.applicationContext
+        supervisor.start()
     }
 
-    @Synchronized
-    fun stop() {
-        stopping = true
-        process?.destroy()
-        process = null
+    fun stop() = supervisor.stop()
+
+    fun retry(context: Context) {
+        if (!retryAvailable) return
+        supervisor.stop()
+        start(context)
     }
 
-    private fun supervise(context: Context) {
+    private fun supervise(context: Context, token: HostSupervisor.Cancellation) {
+        retryAvailable = false
+        error = null
         try {
             RuntimeInstaller.installIfNeeded(context) { status = it }
         } catch (e: Exception) {
+            if (e is ChildProcess.Unterminated) token.restartAllowed = false
+            retryAvailable = e is java.io.IOException
             fail("Could not prepare the Termux runtime", e)
             return
         }
 
         var backoff = 2_000L
-        while (!stopping) {
+        while (!token.cancelled) {
             var started: Process? = null
             try {
                 status = "Starting OpenCode"
                 error = null
                 pairingUrl = null
                 started = launch(context)
-                process = started
+                token.attach(started)
+                if (token.cancelled) break
                 status = "Waiting for OpenCode"
-                pairingUrl = awaitPairing(started)
+                pairingUrl = awaitPairing(started, token)
                 status = "Ready"
                 backoff = 2_000L
                 val code = started.waitFor()
-                if (stopping) break
+                if (token.cancelled) break
                 Log.w(TAG, "OpenCode exited with $code")
                 status = "OpenCode stopped (exit $code), restarting"
             } catch (e: Exception) {
-                if (!stopping) fail("OpenCode stopped", e)
+                if (!token.cancelled) fail("OpenCode stopped", e)
             } finally {
                 // A failed readiness/pairing attempt must not leave a server
                 // holding the loopback port when the supervisor retries.
                 started?.let { child ->
-                    if (child.isAlive) {
-                        child.destroy()
-                        if (!child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                            child.destroyForcibly()
-                            child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
-                        }
+                    try {
+                        ChildProcess.terminate(child)
+                    } catch (e: Exception) {
+                        // Refuse a second owner if the old process cannot be confirmed dead.
+                        token.restartAllowed = false
+                        fail("Could not stop the local server; restart the app", e)
                     }
                 }
-                process = null
                 pairingUrl = null
             }
-            if (stopping) break
+            // Do not return from finally: it would suppress exceptions and other cleanup.
+            // A failed shutdown must still block any second server owner.
+            if (!token.restartAllowed) return
+            if (token.cancelled) break
             try {
                 Thread.sleep(backoff)
             } catch (_: InterruptedException) {
-                if (stopping) break
+                if (token.cancelled) break
             }
             backoff = (backoff * 2).coerceAtMost(30_000L)
         }
@@ -111,6 +116,7 @@ object OpenCodeHost {
     }
 
     private fun launch(context: Context): Process {
+        synchronized(output) { output.setLength(0) }
         password = storedPassword(context)
         val workspace = File(Termux.HOME, "projects/workspace")
         check(workspace.isDirectory || workspace.mkdirs()) { "Cannot create project workspace: $workspace" }
@@ -126,24 +132,30 @@ object OpenCodeHost {
         val started = builder.start()
         Thread {
             try {
-                started.inputStream.bufferedReader().forEachLine { line ->
-                    Log.i(TAG, line)
-                    synchronized(output) {
-                        output.append(line).append('\n')
-                        if (output.length > LOG_LIMIT) output.delete(0, output.length - LOG_LIMIT)
+                started.inputStream.bufferedReader().use { reader ->
+                    val buffer = CharArray(2048)
+                    while (true) {
+                        val size = reader.read(buffer)
+                        if (size < 0) break
+                        val category = Diagnostics.fromOutput(String(buffer, 0, size)) ?: continue
+                        Log.i(TAG, category)
+                        synchronized(output) {
+                            output.append(category).append('\n')
+                            if (output.length > LOG_LIMIT) output.delete(0, output.length - LOG_LIMIT)
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "server output closed", e)
+                Log.w(TAG, "Server output stream closed")
             }
         }.apply { isDaemon = true }.start()
         return started
     }
 
     /** Polls /api/info until the server answers, then redeems a pairing code. */
-    private fun awaitPairing(started: Process): String {
+    private fun awaitPairing(started: Process, token: HostSupervisor.Cancellation): String {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
+        while (!token.cancelled && System.currentTimeMillis() < deadline) {
             if (!started.isAlive) throw IllegalStateException("OpenCode exited during startup:\n${log()}")
             if (statusCode("GET", "/api/info") == 200) return pairingURL()
             Thread.sleep(500)
@@ -197,9 +209,10 @@ object OpenCodeHost {
     }
 
     private fun fail(message: String, e: Exception) {
-        Log.e(TAG, message, e)
+        val safeMessage = "$message. ${Diagnostics.failure(e)}"
+        Log.e(TAG, safeMessage)
         status = message
-        error = "$message: ${e.message ?: e.toString()}"
+        error = safeMessage
     }
 
     private fun log(): String = synchronized(output) { output.toString() }
