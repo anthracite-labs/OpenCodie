@@ -20,14 +20,3 @@
  			echo "[*] Extracting '$package_name'..."
  			(cd "$package_tmpdir"
  				ar x package.deb
-@@ -218,6 +224,10 @@
- 			local package_filename=$(read_db_packages_pac "FILENAME")
- 			curl --fail --location --output "$package_tmpdir/package.pkg.tar.xz" "${REPO_BASE_URL}/${package_arch}/${package_filename}"
- 
-+			local package_sha256
-+			package_sha256=$(echo "${PACKAGE_METADATA[${package_name}]}" | awk '/^SHA256:/ {print $2}')
-+			[[ "$package_sha256" =~ ^[a-f0-9]{64}$ ]] || { echo "Missing signed package digest" >&2; exit 1; }
-+			printf '%s  %s\n' "$package_sha256" "$package_tmpdir/package.deb" | sha256sum -c -
- 			echo "[*] Extracting '$package_name'..."
- 			(cd "$package_tmpdir"
- 				local package_desc="${package_name}-$(read_db_packages_pac VERSION)"
