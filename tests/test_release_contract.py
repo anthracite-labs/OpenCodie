@@ -1,6 +1,7 @@
 """Build-contract checks for the single Android release artifact."""
 from pathlib import Path
 import json
+import re
 import subprocess
 import unittest
 
@@ -135,6 +136,62 @@ class BuildContractTest(unittest.TestCase):
         self.assertEqual(parsed["shell"], "/data/data/com.termux/files/usr/bin/bash")
         self.assertEqual(parsed["update"], "disable")
         self.assertEqual(parsed["permissions"][0]["effect"], "ask")
+
+
+    def test_launcher_environment_defers_to_the_host(self):
+        """The launcher fills gaps; the host's Termux.environment() always wins.
+
+        The env contract lives in Termux.kt and every process the app starts
+        inherits it. The launcher runs later, inside Termux, so it may add
+        variables the host cannot know about -- but any variable both sides set
+        must use the `${VAR:-default}` form, or a host value would be silently
+        overridden and the two contracts would drift apart.
+        """
+        host = (ROOT / "app/src/main/java/com/termux/Termux.kt").read_text()
+        launcher = (ROOT / "scripts/opencode-wrapper.sh").read_text()
+
+        host_vars = set(re.findall(r'"([A-Z_][A-Z0-9_]*)" to', host))
+        launcher_vars = set(
+            re.findall(r"^(?:export )?([A-Z_][A-Z0-9_]*)=", launcher, re.MULTILINE)
+        )
+        self.assertTrue(host_vars, "expected variables in Termux.environment()")
+        self.assertTrue(launcher_vars, "expected exports in the launcher")
+
+        shared = sorted(host_vars & launcher_vars)
+        self.assertTrue(shared, "launcher and host should agree on PREFIX at least")
+        for name in shared:
+            self.assertRegex(
+                launcher,
+                rf"(?m)^(?:export )?{name}=\"\$\{{{name}:-",
+                f"{name} is set by both host and launcher, so it must defer",
+            )
+
+        # The launcher's fallback prefix must match the host prefix exactly.
+        self.assertIn('const val PREFIX = "$ROOTFS/usr"', host)
+        self.assertIn(
+            'PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"',
+            launcher,
+        )
+
+    def test_launcher_installs_as_the_sole_opencode_entrypoint(self):
+        """The wrapper must stay the only way opencode is started.
+
+        It supplies LD_LIBRARY_PATH and OPENCODE_DISABLE_FFF, which the host
+        environment does not carry; launching opencode.bin directly would skip
+        them and the bundled file watcher would fail to load libc++.
+        """
+        build = (ROOT / "scripts/build-opencode.sh").read_text()
+        runtime = (ROOT / "scripts/build-runtime.sh").read_text()
+        host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()
+
+        self.assertIn(
+            'install -m 755 "$REPO_ROOT/scripts/opencode-wrapper.sh" "$DIST/opencode/opencode"',
+            build,
+        )
+        self.assertIn('install -m 755 "$DIST/opencode/opencode" "$STAGE/bin/opencode"', runtime)
+        # The host must exec the launcher, never the raw binary.
+        self.assertIn("exec ${Termux.PREFIX}/bin/opencode serve", host)
+        self.assertNotIn("opencode.bin", host)
 
 
 if __name__ == "__main__":

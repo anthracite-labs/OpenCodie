@@ -1,5 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/sh
 # OpenCodie launcher: runs the compiled OpenCode binary inside the Termux prefix.
+#
+# Environment layering: the app owns the base environment in Termux.kt and passes
+# it to every process it starts. This launcher runs later, inside Termux, and only
+# fills gaps the host cannot know about (LD_LIBRARY_PATH, OPENCODE_DISABLE_FFF).
+# Anything both sides set must use ${VAR:-default} so the host value always wins;
+# tests/test_release_contract.py enforces that.
 set -eu
 self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 dir=$(CDPATH= cd -- "$(dirname "$self")" && pwd)
