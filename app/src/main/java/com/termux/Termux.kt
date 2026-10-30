@@ -19,6 +19,8 @@ object Termux {
     /** Environment for every Termux process we start (server, PTY daemon, shells). */
     fun environment(uid: Int): MutableMap<String, String> = linkedMapOf(
         "HOME" to HOME,
+        // Keep an old/accidental ~/.git from capturing projects below the home directory.
+        "GIT_CEILING_DIRECTORIES" to HOME,
         "PREFIX" to PREFIX,
         "PATH" to "$PREFIX/bin",
         "TMPDIR" to "$PREFIX/tmp",
