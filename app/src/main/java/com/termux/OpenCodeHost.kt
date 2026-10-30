@@ -58,12 +58,14 @@ object OpenCodeHost {
     private fun supervise(context: Context, token: HostSupervisor.Cancellation) {
         retryAvailable = false
         error = null
+        // Only fixed installer stage labels are displayed; never expose script output.
+        var installStage = "initialization"
         try {
-            RuntimeInstaller.installIfNeeded(context) { status = it }
+            RuntimeInstaller.installIfNeeded(context, { status = it }, { installStage = it })
         } catch (e: Exception) {
             if (e is ChildProcess.Unterminated) token.restartAllowed = false
             retryAvailable = e is java.io.IOException
-            fail("Could not prepare the Termux runtime", e)
+            fail("Could not prepare the Termux runtime (stage: $installStage)", e)
             return
         }
 
