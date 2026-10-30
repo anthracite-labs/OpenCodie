@@ -2,10 +2,10 @@
 """Authenticate a Packages index using keys from the pinned Termux source commit."""
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.request
 from pathlib import Path
 
 
@@ -26,16 +26,20 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as directory:
         signed = Path(directory) / "InRelease"
         verified = Path(directory) / "Release"
-        with urllib.request.urlopen(origin + "/dists/stable/InRelease", timeout=30) as response:
-            signed.write_bytes(response.read(4 * 1024 * 1024 + 1))
+        # Use the same TLS client as the pinned generator; this repository rejects urllib's client.
+        subprocess.run(["curl", "-fLsS", "--connect-timeout", "15", "--max-time", "60",
+                        "--max-filesize", str(4 * 1024 * 1024), "-o", str(signed),
+                        origin + "/dists/stable/InRelease"], check=True)
         if signed.stat().st_size > 4 * 1024 * 1024:
             raise ValueError("Signed metadata too large")
         keyrings = sorted(Path(keys).glob("*.gpg"))
         if not keyrings:
             raise ValueError("Pinned Termux keyring is absent")
-        subprocess.run(["gpgv", "--homedir", directory,
+        verifier = ["gpgv"] if shutil.which("gpgv") else ["gpg", "--no-options", "--batch", "--no-default-keyring"]
+        subprocess.run([*verifier, "--homedir", directory,
                         *[arg for key in keyrings for arg in ("--keyring", str(key))],
-                        "--output", str(verified), str(signed)], check=True)
+                        "--output", str(verified),
+                        *([] if verifier[0] == "gpgv" else ["--decrypt"]), str(signed)], check=True)
         verify_index(index, verified.read_text(), architecture)
         target = Path(evidence)
         target.mkdir(parents=True, exist_ok=True)

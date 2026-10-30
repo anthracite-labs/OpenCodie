@@ -68,8 +68,8 @@ echo "==> archive"
 rm -f "$ARCHIVE"
 (cd "$STAGE" && zip -r -9 -q "$ARCHIVE" ./*)
 
-for expected in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
-    unzip -l "$ARCHIVE" | grep -q " $expected\$" || {
+for expected in bin/setsid bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
+    unzip -l "$ARCHIVE" | grep " $expected\$" >/dev/null || {
         echo "runtime is missing $expected" >&2
         exit 1
     }
@@ -79,7 +79,17 @@ echo "==> embed in APK assets"
 mkdir -p "$ASSETS"
 cp "$ARCHIVE" "$ASSETS/runtime-aarch64.zip"
 sha256sum "$ARCHIVE" | cut -d' ' -f1 >"$ASSETS/runtime.sha256"
-printf '%s\n' "$OPENCODE_VERSION" >"$ASSETS/runtime.version"
+# Include both APK-owned executable digests so patches with the same upstream version upgrade too.
+RUNTIME_ID=$(python3 - "$DIST/opencode/opencode" "$DIST/opencode/opencode.bin" <<'PYID'
+import hashlib,sys
+h=hashlib.sha256()
+for path in sys.argv[1:]:
+    with open(path,'rb') as source:
+        while chunk:=source.read(1024*1024): h.update(chunk)
+print(h.hexdigest())
+PYID
+)
+printf '%s:%s\n' "$OPENCODE_VERSION" "$RUNTIME_ID" >"$ASSETS/runtime.version"
 ls -lh "$ARCHIVE" "$ASSETS/runtime-aarch64.zip"
 cat "$ASSETS/runtime.sha256"
 
