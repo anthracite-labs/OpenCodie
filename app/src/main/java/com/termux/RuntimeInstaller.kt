@@ -324,7 +324,10 @@ object RuntimeInstaller {
 
     private fun writeDefaultConfig(log: (String) -> Unit) {
         val config = File(Termux.HOME, ".config/opencode/opencode.json")
-        if (config.exists() && isJsonObject(config)) return
+        if (config.exists() && isJsonObject(config)) {
+            mergeMissingDefaults(config, log)
+            return
+        }
         if (config.exists()) {
             // Invalid JSON makes OpenCode fail to start with no clue why. Keep the
             // user's bytes for recovery, then restore a config that always loads.
@@ -335,6 +338,34 @@ object RuntimeInstaller {
         config.parentFile?.mkdirs()
         config.writeText(defaultOpenCodeConfig())
         log("Wrote ${config.path}")
+    }
+
+    /** Add missing stock keys to a valid user config; never overwrite user values.
+     *
+     * Preserves `mcp.servers.*` and any other custom keys byte-for-byte when
+     * nothing is missing (no write). When keys are missing, backs up first,
+     * then adds only the absent stock keys (`$schema`, `shell`, `permissions`,
+     * `update`). Existing values — including a customized `shell` — win.
+     */
+    private fun mergeMissingDefaults(config: File, log: (String) -> Unit) {
+        val current = try {
+            JSONObject(config.readText())
+        } catch (_: Exception) {
+            return
+        }
+        val defaults = JSONObject(defaultOpenCodeConfig())
+        var changed = false
+        for (key in defaults.keys()) {
+            if (!current.has(key)) {
+                current.put(key, defaults.get(key))
+                changed = true
+            }
+        }
+        if (!changed) return
+        val backup = File(config.parentFile, "${config.name}.pre-merge-${System.currentTimeMillis()}")
+        config.copyTo(backup, overwrite = false)
+        config.writeText(current.toString(2) + "\n")
+        log("Merged missing defaults into ${config.path}; backup at ${backup.path}")
     }
 
     /** A stock configuration OpenCode can always load. */
