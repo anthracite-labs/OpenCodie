@@ -28,6 +28,9 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git", lock)
         self.assertIn(".directory(workspace)", host)
         self.assertIn('File(Termux.HOME, "projects/workspace")', host)
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        self.assertIn("selectDefaultMirror(prefix)", installer)
+        self.assertIn('"etc/termux/chosen_mirrors"', installer)
 
 
 if __name__ == "__main__":
