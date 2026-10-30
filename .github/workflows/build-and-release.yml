@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      device_tests:
+        description: Run on the provisioned ARM64 Android device runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -153,6 +158,8 @@ jobs:
             echo "OPENCODIE_KEY_PASSWORD=$pass"
           } >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"
+      - name: JVM behavioral tests and instrumentation compilation
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebugAndroidTest
       - name: Assemble APK
         env:
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
@@ -247,3 +254,27 @@ jobs:
               --title "OpenCodie v$version (build $GITHUB_RUN_NUMBER)" \
               --prerelease --generate-notes
           fi
+
+  device:
+    name: ARM64 Android runtime smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.device_tests
+    needs: runtime
+    runs-on: [self-hosted, android-arm64]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: prepared-runtime
+          path: app/src/main/assets
+      - name: Require ARM64 device and run smoke
+        run: |
+          set -euo pipefail
+          adb wait-for-device
+          adb shell getprop ro.product.cpu.abilist | grep -q arm64-v8a
+          ./gradlew --no-daemon :app:connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-device-results
+          path: app/build/reports/androidTests

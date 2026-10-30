@@ -29,8 +29,8 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 - [ ] **Gate D:** no unmitigated high issues; tests and supported-device evidence attached; maintainer + security approval for stable release.
 
 ## Required maintainer decisions
-- [ ] Existing config: confirm reversible, previewed opt-in migration (no silent changes).
-- [ ] Storage: confirm user-initiated request vs current automatic first-launch prompt.
+- [x] Existing config: maintainer chose manual migration instructions; preserve every existing config.
+- [x] Storage: maintainer chose to retain the current automatic first-launch prompt.
 - [ ] Android matrix: confirm API 29, middle version, Android 16/ARM64 devices.
 - [ ] Stable release: approve signing/recovery evidence and release authorization.
 
@@ -38,7 +38,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 
 | Task | Commit/PR | Failing test (RED) | Tests/build/device result | Review/decision |
 |---|---|---|---|---|
-| T00 | — | — | — | — |
+| T00 | local harness | Legacy Android test API failed to compile; selected supported AndroidX runner | JVM state test passes; debug + instrumentation APK compile (`work/t00-build.log`) | PARTIAL: device lane defined; no device or genuine runtime assets |
 | T01 | — | — | — | — |
 | T02 | — | — | — | — |
 | T03 | — | — | — | — |
@@ -50,3 +50,13 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T09 | — | — | — | — |
 | T10 | — | — | — | — |
 | T11 | — | — | — | — |
+
+### Execution environment — 2026-10-30
+
+- Working branch `work`, HEAD/origin/main `ccdd3e8`; clean at entry. No pushes or stable release authorized.
+- JDK 17, Gradle 9.8.2, AGP 9.5.0, SDK 37.0 are provisioned via `/workspace/.opencodie/env.sh`.
+- Baseline: Python **6/6 pass**; `:app:assembleDebug` **passes** (`work/baseline-build.log`). Baseline APK has no runtime assets and is only compile evidence.
+- `adb devices -l`: **no connected devices**. Device matrix, pairing and offline installation cannot be claimed.
+- Prior runtime generation failed: Termux package index returned HTTP 403 (`/workspace/.opencodie/runtime.log`); genuine archive verification is blocked until this input is available.
+- Gradle/adb require local sockets outside the command sandbox; build commands use the approved execution capability.
+- Maintainer decisions: retain automatic storage prompt; provide manual config migration instructions. Existing config bytes must remain unchanged.
