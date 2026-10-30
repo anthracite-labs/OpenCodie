@@ -50,6 +50,7 @@ class MainActivity : Activity() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.textZoom = (resources.configuration.fontScale * 100).toInt()
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             webViewClient = client
