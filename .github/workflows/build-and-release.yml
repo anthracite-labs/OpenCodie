@@ -77,6 +77,7 @@ jobs:
           import zipfile
           with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
               expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg",
+                        "etc/termux/mirrors/default",
                         "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
               assert z.testzip() is None
