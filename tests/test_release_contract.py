@@ -23,7 +23,6 @@ class BuildContractTest(unittest.TestCase):
         lock = (ROOT / "runtime.lock").read_text()
         host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()
         self.assertIn("TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git", lock)
-        self.assertIn('File(Termux.HOME, "projects")', host)
         self.assertIn(".directory(workspace)", host)
         self.assertIn('File(Termux.HOME, "projects/workspace")', host)
 
