@@ -40,7 +40,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 |---|---|---|---|---|
 | T00 | local harness | Legacy Android test API failed to compile; selected supported AndroidX runner | JVM state test passes; debug + instrumentation APK compile (`work/t00-build.log`) | PARTIAL: device lane defined; no device or genuine runtime assets |
 | T01 | policy + atomic creation | Old generated config: external_directory was allow, expected ask (`work/t01-red.log`) | Pinned V2 schema/matcher PASS; config byte/symlink preservation tests + debug build PASS | Device approval/project workflow still pending |
-| T02 | — | — | — | — |
+| T02 | exact origin + NSC | LocalOrigin trust-boundary regression fails before helper exists (`work/t02-red.log`) | Exact-origin JVM cases, debug APK and Android test APK PASS (`work/t02-build.log`) | Device pairing/upload/redirect/subresource checks pending; content access retained for picker |
 | T03 | — | — | — | — |
 | T04 | — | — | — | — |
 | T05 | — | — | — | — |

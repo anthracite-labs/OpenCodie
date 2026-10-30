@@ -32,6 +32,12 @@ class HostSmokeTest {
                 assertNotNull(web)
                 assertTrue(web!!.url?.startsWith("http://127.0.0.1:4096/") == true)
                 assertTrue(web.settings.javaScriptEnabled)
+                assertFalse(web.settings.allowFileAccess)
+                assertFalse(web.settings.allowUniversalAccessFromFileURLs)
+                assertTrue(web.settings.allowContentAccess)
+                val policy = android.security.NetworkSecurityPolicy.getInstance()
+                assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
+                assertFalse(policy.isCleartextTrafficPermitted("example.com"))
             }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }

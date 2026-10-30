@@ -27,6 +27,8 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -34,6 +36,7 @@ import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
@@ -93,6 +96,12 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.WHITE)
         }
         webView = WebView(this).apply {
+            settings.allowFileAccess = false
+            // The document picker grants selected content URIs for uploads.
+            settings.allowContentAccess = true
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.textZoom = (resources.configuration.fontScale * 100).toInt()
@@ -100,11 +109,9 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             webViewClient = client
             webChromeClient = chrome
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                val uri = Uri.parse(url)
-                if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
-                    uri.port == OpenCodeHost.PORT
-                ) download(url, contentDisposition, mimeType)
+                if (LocalOrigin.allows(url)) download(url, contentDisposition, mimeType)
             }
         }
         setContentView(FrameLayout(this).apply {
@@ -119,9 +126,15 @@ class MainActivity : Activity() {
     private val client = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
-            if (url.scheme == "http" && url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
-            openExternally(url)
+            if (LocalOrigin.allows(url.toString())) return false
+            if (request.isForMainFrame && url.scheme in listOf("http", "https")) openExternally(url)
             return true
+        }
+
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (LocalOrigin.allows(request.url.toString())) return null
+            return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(),
+                ByteArrayInputStream(ByteArray(0)))
         }
 
         override fun onPageFinished(view: WebView, url: String) {
