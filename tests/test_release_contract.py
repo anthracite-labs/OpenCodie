@@ -119,8 +119,9 @@ class BuildContractTest(unittest.TestCase):
         """
         installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
         self.assertIn("import org.json.JSONObject", installer)
-        # Valid configs short-circuit: user edits win.
-        self.assertIn("if (config.exists() && isJsonObject(config)) return", installer)
+        # Valid configs merge missing defaults, never overwrite user values.
+        self.assertIn("mergeMissingDefaults(config, log)", installer)
+        self.assertIn("if (!current.has(key))", installer)
         # Malformed configs are copied aside before the default is restored.
         self.assertIn(".broken-", installer)
         self.assertIn("copyTo(backup, overwrite = false)", installer)
@@ -196,11 +197,18 @@ class BuildContractTest(unittest.TestCase):
 
     def test_webview_hardening_disables_file_access(self):
         activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        # Secure default, content-only gating: file:// never enabled.
         self.assertIn("settings.allowFileAccess = false", activity)
         self.assertIn("settings.allowContentAccess = false", activity)
         self.assertIn("settings.allowFileAccessFromFileURLs = false", activity)
         self.assertIn("settings.allowUniversalAccessFromFileURLs = false", activity)
         self.assertIn("settings.safeBrowsingEnabled = true", activity)
+        self.assertIn("private fun hasStoragePermission()", activity)
+        self.assertIn("private fun updateWebViewFileAccess()", activity)
+        self.assertIn("webView.settings.allowFileAccess = false", activity)
+        self.assertIn("webView.settings.allowContentAccess = hasStoragePermission()", activity)
+        self.assertIn("onMissing: () -> Unit = {}", activity)
+        self.assertIn("updateWebViewFileAccess()", activity)
         self.assertIn("startForResultSafely", activity)
 
     def test_loopback_cleartext_only_with_manifest_permissions(self):
@@ -245,6 +253,30 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("scripts/lib.sh", workflow)
         self.assertIn("build-tools;37.0.0", workflow)
         self.assertNotIn("build-tools;36.0.0", workflow)
+
+
+    def test_config_merge_preserves_mcp(self):
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        self.assertIn("private fun mergeMissingDefaults(", installer)
+        self.assertIn('for (key in listOf("\\$schema", "shell"))', installer)
+        self.assertIn("private fun atomicWriteText(", installer)
+        self.assertIn(".tmp-", installer)
+        self.assertIn("renameTo(target)", installer)
+        self.assertIn(".pre-merge-", installer)
+        # Policy keys untouched: omission keeps upstream default.
+        self.assertNotIn('"permissions"', installer.split("private fun mergeMissingDefaults(", 1)[1].split("private fun atomicWriteText(", 1)[0].replace('"$schema"', '').replace('"shell"', ''))
+        # Malformed path still backs up separately.
+        self.assertIn(".broken-", installer)
+
+    def test_agents_md_single_source_locked(self):
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        for bullet in [
+            "Use pkg, never sudo",
+            "pkg install -y PACKAGE",
+            "never initialize Git in ~ or ~/projects",
+            "verify its eventual outcome",
+        ]:
+            self.assertIn(bullet, installer)
 
 
 if __name__ == "__main__":

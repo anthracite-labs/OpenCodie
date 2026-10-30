@@ -63,6 +63,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        updateWebViewFileAccess()
     }
 
     override fun onPause() {
@@ -98,6 +99,7 @@ class MainActivity : Activity() {
             settings.textZoom = (resources.configuration.fontScale * 100).toInt()
             settings.databaseEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            // Secure default: no file access until the user grants storage.
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.allowFileAccessFromFileURLs = false
@@ -112,6 +114,7 @@ class MainActivity : Activity() {
                 ) download(url, contentDisposition, mimeType)
             }
         }
+        updateWebViewFileAccess()
         setContentView(FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
@@ -120,6 +123,29 @@ class MainActivity : Activity() {
         startForegroundService(Intent(this, OpenCodeService::class.java))
         requestNotificationPermission()
         poll()
+    }
+
+    /** Content access follows explicit storage permission; file access stays off.
+     *
+     * WebView loads only the loopback HTTP UI; upload/download use native
+     * pickers + backend. No verified feature needs file:// URLs, and
+     * allowFileAccess also exposes app-private files — so it stays false.
+     * allowContentAccess is gated because picker results are content:// URIs.
+     */
+    private fun hasStoragePermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= 30) {
+            Environment.isExternalStorageManager()
+        } else {
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+
+    private fun updateWebViewFileAccess() {
+        if (!::webView.isInitialized) return
+        webView.settings.allowFileAccess = false
+        webView.settings.allowContentAccess = hasStoragePermission()
+        // Never enable file-URL inheritance: blocks file:// exfiltration.
+        webView.settings.allowFileAccessFromFileURLs = false
+        webView.settings.allowUniversalAccessFromFileURLs = false
     }
 
     private fun requestNotificationPermission() {
@@ -192,7 +218,11 @@ class MainActivity : Activity() {
             STORAGE_SETTINGS_REQUEST -> {
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
                     setupStorageLinks()
-                } else show("Storage access not granted; termux-setup-storage can be retried")
+                    updateWebViewFileAccess()
+                } else {
+                    updateWebViewFileAccess()
+                    show("Storage access not granted; termux-setup-storage can be retried")
+                }
             }
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
@@ -207,6 +237,7 @@ class MainActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             setupStorageLinks()
         } else show("Storage permission denied; termux-setup-storage can be retried")
+        updateWebViewFileAccess()
     }
 
     /** Bootstrap installs in the service; ask only once after its ready marker exists. */
@@ -371,7 +402,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startForResultSafely(intent: Intent, requestCode: Int, onMissing: () -> Unit): Boolean {
+    private fun startForResultSafely(intent: Intent, requestCode: Int, onMissing: () -> Unit = {}): Boolean {
         return try {
             startActivityForResult(intent, requestCode)
             true
