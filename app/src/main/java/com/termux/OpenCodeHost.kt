@@ -97,11 +97,13 @@ object OpenCodeHost {
                         // Refuse a second owner if the old process cannot be confirmed dead.
                         token.restartAllowed = false
                         fail("Could not stop the local server; restart the app", e)
-                        return
                     }
                 }
                 pairingUrl = null
             }
+            // Do not return from finally: it would suppress exceptions and other cleanup.
+            // A failed shutdown must still block any second server owner.
+            if (!token.restartAllowed) return
             if (token.cancelled) break
             try {
                 Thread.sleep(backoff)
