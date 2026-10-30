@@ -60,6 +60,7 @@ object RuntimeInstaller {
             installing.writeText("$bundled\n")
             bootstrap(context, prefix, staging, log)
             ensureDirectories(prefix)
+            selectDefaultMirror(prefix)
             runSecondStage(prefix, log)
             writeOpenCodeConfig(log)
             writeVersion(prefix, bundled)
@@ -82,6 +83,15 @@ object RuntimeInstaller {
         ensureDirectories(prefix)
         writeOpenCodeConfig(log)
         log("Runtime $bundled ready")
+    }
+
+    /** Select the stock Termux origin mirror before the first pkg call. */
+    private fun selectDefaultMirror(prefix: File) {
+        val mirrors = File(prefix, "etc/termux/mirrors")
+        val default = File(mirrors, "default")
+        check(default.isFile) { "Bundled Termux default mirror is missing" }
+        val selected = File(prefix, "etc/termux/chosen_mirrors")
+        if (!selected.exists()) Os.symlink(default.path, selected.path)
     }
 
     private fun ensureDirectories(prefix: File) {
