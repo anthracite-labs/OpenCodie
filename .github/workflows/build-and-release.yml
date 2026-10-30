@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check source inputs
         run: |
           set -euo pipefail
@@ -38,7 +38,7 @@ jobs:
           PY
       - name: Cache prepared runtime
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             app/src/main/assets/runtime-aarch64.zip
@@ -82,7 +82,7 @@ jobs:
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
               assert z.testzip() is None
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prepared-runtime
           path: app/src/main/assets/runtime*
@@ -95,8 +95,8 @@ jobs:
     needs: runtime
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -108,11 +108,11 @@ jobs:
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;36.0.0'
           test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
           test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: prepared-runtime
           path: app/src/main/assets
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Unlock production signing key when available
         if: github.event_name != 'pull_request'
         env:
@@ -205,7 +205,7 @@ jobs:
           install -m 644 app/build/outputs/apk/release/app-release.apk dist/OpenCodie.apk
       - name: Upload OpenCodie APK
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: OpenCodie
           path: dist/OpenCodie.apk
@@ -219,8 +219,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: OpenCodie
           path: dist-apk
