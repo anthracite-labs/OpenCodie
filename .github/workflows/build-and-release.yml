@@ -44,7 +44,24 @@ jobs:
             app/src/main/assets/runtime-aarch64.zip
             app/src/main/assets/runtime.sha256
             app/src/main/assets/runtime.version
-          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
+          key: runtime-v1-${{ runner.os }}-${{ hashFiles('runtime.lock', 'scripts/build-opencode.sh', 'scripts/build-natives.sh', 'scripts/build-runtime.sh', 'scripts/check-elf.sh', 'scripts/lib.sh', 'scripts/opencode-wrapper.sh', 'scripts/patch-opentui-loader.py', 'patches/**') }}
+      - name: Cache Bun toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun
+          key: bun-v1-${{ runner.os }}-1.4.4
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-v1-${{ runner.os }}-${{ hashFiles('runtime.lock') }}
+      - name: Cache Android NDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/android-ndk-r28b
+          key: ndk-v1-${{ runner.os }}-r28b
       - name: Install native build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -52,10 +69,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zip unzip xz-utils binutils curl
           rustup target add aarch64-linux-android
-          curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
+          if [ ! -x "$HOME/.bun/bin/bun" ]; then
+            curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
+          fi
           test "$("$HOME/.bun/bin/bun" --version)" = 1.4.4
-          curl -fsSL https://dl.google.com/android/repository/android-ndk-r28b-linux.zip -o "$RUNNER_TEMP/ndk.zip"
-          sudo unzip -q "$RUNNER_TEMP/ndk.zip" -d /opt
+          if [ ! -d /opt/android-ndk-r28b ]; then
+            curl -fsSL https://dl.google.com/android/repository/android-ndk-r28b-linux.zip -o "$RUNNER_TEMP/ndk.zip"
+            sudo unzip -q "$RUNNER_TEMP/ndk.zip" -d /opt
+          fi
       - name: Build native runtime
         if: steps.cache.outputs.cache-hit != 'true'
         env:
@@ -105,9 +126,9 @@ jobs:
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;36.0.0'
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;37.0.0'
           test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
-          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -x "$ANDROID_HOME/build-tools/37.0.0/apksigner"
       - uses: actions/download-artifact@v4
         with:
           name: prepared-runtime
@@ -172,7 +193,7 @@ jobs:
             APK=app/build/outputs/apk/release/app-release.apk
           fi
           test -s "$APK"
-          BT="$ANDROID_HOME/build-tools/36.0.0"
+          BT="$ANDROID_HOME/build-tools/37.0.0"
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
           grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
