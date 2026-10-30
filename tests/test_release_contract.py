@@ -18,6 +18,9 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("if: github.event_name != 'pull_request'", workflow)
         self.assertNotIn("path: app/build/outputs/apk/**/*.apk", workflow)
         self.assertIn('"$BT/apksigner" verify "$APK"', workflow)
+        self.assertIn('gh release create "$tag"', workflow)
+        self.assertIn('"$APK#OpenCodie.apk"', workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
 
     def test_git_installed_with_bootstrap_and_safe_workspace(self):
         lock = (ROOT / "runtime.lock").read_text()
