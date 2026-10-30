@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var loadedUrl: String? = null
     private var fileChooser: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
+    private var resumed = false
 
     // termux-setup-storage broadcasts this action from the app's own Termux process.
     private val storageReceiver = object : BroadcastReceiver() {
@@ -57,6 +58,16 @@ class MainActivity : Activity() {
                 requestStorageAccess()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
     }
 
     override fun onStart() {
@@ -183,6 +194,17 @@ class MainActivity : Activity() {
         } else show("Storage permission denied; termux-setup-storage can be retried")
     }
 
+    /** Bootstrap installs in the service; ask only once after its ready marker exists. */
+    private fun maybeRequestBootstrapStorage() {
+        if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return
+        val preferences = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+        if (preferences.getBoolean("storage_prompted", false)) return
+        // Commit before opening Android settings so process death cannot cause prompt loops.
+        if (preferences.edit().putBoolean("storage_prompted", true).commit()) {
+            requestStorageAccess()
+        }
+    }
+
     private fun requestStorageAccess() {
         if (Build.VERSION.SDK_INT >= 30) {
             if (Environment.isExternalStorageManager()) {
@@ -299,6 +321,7 @@ class MainActivity : Activity() {
      */
     private fun poll() {
         handler.postDelayed({
+            maybeRequestBootstrapStorage()
             val error = OpenCodeHost.error
             val url = OpenCodeHost.pairingUrl
             when {
