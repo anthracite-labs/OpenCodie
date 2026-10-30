@@ -50,13 +50,20 @@ internal object RuntimeArchive {
                 record(name, if (entry.isDirectory) Kind.DIRECTORY else Kind.FILE)
                 val isLinks = name == "SYMLINKS.txt"
                 check(!isLinks || !entry.isDirectory) { "Invalid symlink metadata" }
+                // Resolve after keep(): a callback or concurrent actor must not introduce a link parent
+                // between path validation and file creation.
+                val selected = !isLinks && keep(name)
                 val target = File(destination, name)
                 check(target.canonicalPath.startsWith(destination.canonicalPath + File.separator)) { "Archive leaves staging" }
-                val selected = !isLinks && keep(name)
                 if (selected) check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs())
                 if (selected && entry.isDirectory) check(target.isDirectory || target.mkdirs())
                 val text = if (isLinks) ByteArrayOutputStream() else null
-                val output = if (selected && !entry.isDirectory) target.outputStream() else null
+                val output = if (selected && !entry.isDirectory) Files.newOutputStream(
+                    target.toPath(),
+                    java.nio.file.StandardOpenOption.CREATE_NEW,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                ) else null
                 var size = 0L
                 try {
                     while (true) {

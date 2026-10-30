@@ -70,4 +70,18 @@ class HostSupervisorTest {
         assertTrue(exited.await(2, TimeUnit.SECONDS))
         assertEquals(1, runs.get())
     }
+
+    @Test fun unexpectedWorkerExceptionReportsFailureWithoutStartingAnotherOwner() {
+        val observed = CountDownLatch(1)
+        val runs = AtomicInteger()
+        val host = HostSupervisor(onCrash = { observed.countDown() }) {
+            runs.incrementAndGet()
+            throw IllegalStateException("Unexpected host failure")
+        }
+        host.start()
+        assertTrue("Worker failure must be handled", observed.await(2, TimeUnit.SECONDS))
+        repeat(5) { host.start() }
+        assertEquals("Do not start a second owner after an unverified crash", 1, runs.get())
+    }
+
 }

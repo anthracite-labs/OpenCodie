@@ -33,7 +33,9 @@ object OpenCodeHost {
     @Volatile var retryAvailable = false
 
     private var appContext: Context? = null
-    private val supervisor = HostSupervisor { token -> supervise(checkNotNull(appContext), token) }
+    private val supervisor = HostSupervisor(
+        onCrash = { fail("Supervisor stopped unexpectedly; restart OpenCodie", IllegalStateException("Supervisor worker failed")) },
+    ) { token -> supervise(checkNotNull(appContext), token) }
 
     private var password: String = ""
     private val output = StringBuilder()

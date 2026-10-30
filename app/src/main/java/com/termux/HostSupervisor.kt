@@ -1,7 +1,10 @@
 package com.termux
 
 /** One owner retires completely before a requested replacement may start. */
-internal class HostSupervisor(private val run: (Cancellation) -> Unit) {
+internal class HostSupervisor(
+    private val onCrash: () -> Unit = {},
+    private val run: (Cancellation) -> Unit,
+) {
     internal class Cancellation {
         @Volatile var cancelled = false
             private set
@@ -36,6 +39,13 @@ internal class HostSupervisor(private val run: (Cancellation) -> Unit) {
         worker = Thread {
             try {
                 run(token)
+            } catch (_: Exception) {
+                // An unexpected owner failure cannot silently strand the host or start another
+                // owner before the old child is known to be gone.
+                if (!token.cancelled) {
+                    token.restartAllowed = false
+                    try { onCrash() } catch (_: Exception) { /* Keep the original failure isolated. */ }
+                }
             } finally {
                 synchronized(this) {
                     if (!token.restartAllowed) retirementFailed = true

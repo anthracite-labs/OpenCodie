@@ -38,4 +38,15 @@ class ProcessGroupTest {
             FileOps.removeTree(root)
         }
     }
+
+    @Test fun groupAuthorizationWaitsForMissingLauncherRecord() {
+        val root = Files.createTempDirectory("pending-group").toFile()
+        try {
+            val missing = root.resolve("not-created-yet")
+            assertNull(BootstrapProcess.groupId(missing, -1))
+            missing.writeText("54321\\n")
+            assertEquals(54321, BootstrapProcess.groupId(missing, -1))
+        } finally { FileOps.removeTree(root) }
+    }
+
 }

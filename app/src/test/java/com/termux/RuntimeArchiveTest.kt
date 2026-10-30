@@ -65,4 +65,25 @@ class RuntimeArchiveTest {
             assertFalse(Files.isSymbolicLink(root.resolve("staging/bin/sh").toPath()))
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun refusesSymlinkParentIntroducedWhileSelectingArchiveEntry() {
+        val root = Files.createTempDirectory("archive-race").toFile()
+        val outside = Files.createTempDirectory("outside-archive").toFile()
+        val staging = root.resolve("staging")
+        try {
+            val bytes = zip("parent/payload" to "must stay in staging", "SYMLINKS.txt" to "")
+            try {
+                RuntimeArchive.extract(ByteArrayInputStream(bytes), staging, keep = { name ->
+                    if (name == "parent/payload") Files.createSymbolicLink(staging.resolve("parent").toPath(), outside.toPath())
+                    true
+                })
+                fail("A changed symlink parent was followed outside staging")
+            } catch (_: IllegalStateException) { }
+            assertFalse("Archive escaped into another directory", outside.resolve("payload").exists())
+        } finally {
+            FileOps.removeTree(root)
+            FileOps.removeTree(outside)
+        }
+    }
+
 }

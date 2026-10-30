@@ -23,7 +23,9 @@ internal object BootstrapProcess {
     }
 
     fun groupId(file: File, parentGroup: Int): Int? {
-        if (file.length() > 32) throw ChildProcess.Unterminated()
+        // The launcher may not have published its group file yet.
+        if (!file.exists()) return null
+        if (java.nio.file.Files.isSymbolicLink(file.toPath()) || file.length() > 32) throw ChildProcess.Unterminated()
         val text = file.readText()
         if (text.isEmpty()) return null
         if (!text.endsWith("\n")) throw ChildProcess.Unterminated()
