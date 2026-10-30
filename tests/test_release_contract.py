@@ -33,5 +33,23 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('"etc/termux/chosen_mirrors"', installer)
 
 
+    def test_mobile_webui_is_bundled_and_respects_system_font_scale(self):
+        build = (ROOT / "scripts/build-opencode.sh").read_text()
+        patch = (ROOT / "patches/opencode-mobile-ui.patch").read_text()
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+
+        self.assertIn("apply_patch opencode-mobile-ui.patch", build)
+        self.assertIn("packages/session-ui/src/tools/tool-renderer.tsx", patch)
+        self.assertIn("packages/session-ui/src/components/message-part.css", patch)
+        self.assertIn('data-slot="bash-view-options"', patch)
+        self.assertIn('aria-pressed={wrap()}', patch)
+        self.assertIn('aria-expanded={expanded()}', patch)
+        self.assertIn('data-wrap={wrap()', patch)
+        self.assertIn('data-expanded={expanded()', patch)
+        self.assertIn("overflow-x: auto", patch)
+        self.assertIn("max-height: 75dvh", patch)
+        self.assertIn("settings.textZoom", activity)
+        self.assertIn("resources.configuration.fontScale", activity)
+
 if __name__ == "__main__":
     unittest.main()
