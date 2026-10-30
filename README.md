@@ -139,3 +139,19 @@ The Android build pipeline (`scripts/check-elf.sh`, `scripts/patch-opentui-loade
 adapted from [Astreele/opencode-android](https://github.com/Astreele/opencode-android)
 (MIT). OpenCode, Termux packages and Bun are used unmodified where noted in
 `runtime.lock`.
+
+## Security policy and verification
+
+New installs ask for shell and external-directory access and protect sensitive
+read/edit paths. Existing configurations are preserved byte-for-byte; see the
+[optional manual configuration update](docs/configuration.md). Permission approval
+is not a filesystem sandbox, especially after shared storage is granted.
+
+Downloads stay on the authenticated loopback origin, use bounded transfers and
+keep each picker result tied to its own request. Tap the saving notice to cancel;
+failed partial documents are removed when the provider permits it.
+
+Runtime startup failures caused by recoverable I/O offer tap-to-retry. Invalid
+archives and unverified existing prefixes fail closed. Initial-install retries
+require a matching app-owned installation ID; older incomplete prefixes without
+that proof are preserved for manual recovery.

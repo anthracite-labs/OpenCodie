@@ -20,7 +20,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 ## C — User data protection
 - [ ] **T07 P1** Safe concurrent downloads, redirects, timeouts, cookies. Depends: T02.
 - [ ] **T08 P1** Approved opt-in shared-storage experience. Depends: T01, UX approval.
-- [ ] **T09 P1** User-consented existing-config migration. Depends: T01, migration approval.
+- [x] **T09 P1** Approved manual existing-config instructions; no automatic migration. Depends: T01, migration decision.
 - [ ] **T10 P2** Redact diagnostics. Depends: T00.
 - [ ] **Gate C:** device download/storage/config tests and secret-redaction tests pass.
 
@@ -47,7 +47,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T06 | bounded no-follow staging extraction | Malicious ZIP helper regressions fail before extractor exists (`work/t06-red.log`) | Traversal, duplicate/type collision, link cycle/parent/target, actual size/count fixtures PASS; debug build PASS (`work/t06-build.log`) | Genuine fixture gate added to CI; local genuine archive absent, so its test is explicitly skipped |
 | T07 | request-scoped picker + bounded HTTP | Request registry/transfer behavioral tests fail before implementation (`work/t07-red.log`) | Real HTTP byte export/local redirect/off-origin rejection/HTTP500 + cancellation, picker identity tests and debug build PASS (`work/t07-build.log`) | Android document-provider cancel/cleanup and concurrent picker UI still require device lane |
 | T08 | retain approved prompt; storage link preflight | Missing StorageLinks behavior helper fails (`work/t08-red.log`) | Conflict preflight, injected partial-create rollback/idempotence, Python contracts + debug build PASS (`work/t08-build.log`) | User explicitly retained automatic prompt; API29/30+ grant/deny/retry checks require device |
-| T09 | — | — | — | — |
+| T09 | manual migration docs | Existing malformed/custom configs covered by T01 byte-preservation tests | Manual JSON recommendation exactly matches schema-tested shipped V2 policy; backup/restore + override caveats documented | Maintainer chose manual instructions; no automatic merge/UI or config changes |
 | T10 | — | — | — | — |
 | T11 | — | — | — | — |
 
