@@ -45,7 +45,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T04 | serial owner | Deterministic old-owner/stop/start test fails: requested restart lost (`work/t04-red.log`) | Shutdown acknowledgment/idempotence JVM tests + integrated debug build PASS (`work/t04-build.log`) | Child cleanup fails closed; real device process crash/stress remains pending |
 | T05 | owned initial install + transactional upgrade | Missing behavioral recovery helpers fail (`work/t05-red.log`); prior rollback restored binary before launcher, losing recovery journal | 8 upgrade fault points, rollback retry, unknown-prefix preservation, no-follow deletion and real stalled process deadline PASS; debug build PASS (`work/t05-build.log`) | Tap-to-retry for recoverable bootstrap I/O only; on-device install/upgrade still pending |
 | T06 | bounded no-follow staging extraction | Malicious ZIP helper regressions fail before extractor exists (`work/t06-red.log`) | Traversal, duplicate/type collision, link cycle/parent/target, actual size/count fixtures PASS; debug build PASS (`work/t06-build.log`) | Genuine fixture gate added to CI; local genuine archive absent, so its test is explicitly skipped |
-| T07 | — | — | — | — |
+| T07 | request-scoped picker + bounded HTTP | Request registry/transfer behavioral tests fail before implementation (`work/t07-red.log`) | Real HTTP byte export/local redirect/off-origin rejection/HTTP500 + cancellation, picker identity tests and debug build PASS (`work/t07-build.log`) | Android document-provider cancel/cleanup and concurrent picker UI still require device lane |
 | T08 | — | — | — | — |
 | T09 | — | — | — | — |
 | T10 | — | — | — | — |

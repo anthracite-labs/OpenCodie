@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import android.provider.DocumentsContract
+import android.os.SystemClock
 import android.system.Os
 import android.util.Log
 import android.content.ActivityNotFoundException
@@ -33,10 +35,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
-import java.net.HttpURLConnection
-import java.net.URL
 import java.io.File
 import java.io.ByteArrayInputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
@@ -51,7 +52,9 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var fileChooser: ValueCallback<Array<Uri>>? = null
-    private var pendingDownload: String? = null
+    private val pendingDownloads = PendingDownloads()
+    private val activeDownloads = ConcurrentHashMap<Uri, DownloadTransfer>()
+    private var noticeUntil = 0L
     private var resumed = false
 
     // termux-setup-storage broadcasts this action from the app's own Termux process.
@@ -94,7 +97,10 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.WHITE)
-            setOnClickListener { if (OpenCodeHost.retryAvailable) OpenCodeHost.retry(this@MainActivity) }
+            setOnClickListener {
+                if (activeDownloads.isNotEmpty()) activeDownloads.values.forEach { it.cancel() }
+                else if (OpenCodeHost.retryAvailable) OpenCodeHost.retry(this@MainActivity)
+            }
         }
         webView = WebView(this).apply {
             settings.allowFileAccess = false
@@ -170,6 +176,10 @@ class MainActivity : Activity() {
 
     @Deprecated("super.onActivityResult still delivers the picker results")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        pendingDownloads.take(requestCode)?.let { request ->
+            if (resultCode == RESULT_OK && data?.data != null) save(request, data.data!!)
+            return
+        }
         when (requestCode) {
             FILE_CHOOSER_REQUEST -> {
                 val uris: Array<Uri>? = if (resultCode != RESULT_OK) {
@@ -181,13 +191,6 @@ class MainActivity : Activity() {
                 }
                 fileChooser?.onReceiveValue(uris)
                 fileChooser = null
-            }
-            SAVE_FILE_REQUEST -> {
-                val url = pendingDownload
-                pendingDownload = null
-                if (resultCode == RESULT_OK && url != null && data?.data != null) {
-                    save(url, data.data!!)
-                }
             }
             STORAGE_SETTINGS_REQUEST -> {
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
@@ -295,38 +298,48 @@ class MainActivity : Activity() {
 
     /** Asks the platform picker where to save, then streams the loopback response there. */
     private fun download(url: String, contentDisposition: String?, mimeType: String?) {
-        pendingDownload = url
+        val requestCode = try {
+            pendingDownloads.add(url, CookieManager.getInstance().getCookie(url))
+        } catch (_: IllegalStateException) {
+            show("Too many pending downloads")
+            return
+        }
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, URLUtil.guessFileName(url, contentDisposition, mimeType))
         }
         try {
-            startActivityForResult(intent, SAVE_FILE_REQUEST)
+            startActivityForResult(intent, requestCode)
         } catch (e: ActivityNotFoundException) {
-            pendingDownload = null
+            pendingDownloads.take(requestCode)
             show("No file picker available")
         }
     }
 
-    private fun save(url: String, destination: Uri) {
-        show(getString(R.string.saving))
+    private fun save(request: DownloadRequest, destination: Uri) {
+        val transfer = DownloadTransfer()
+        if (activeDownloads.putIfAbsent(destination, transfer) != null) {
+            show("This destination is already being saved")
+            return
+        }
+        show("Saving… Tap to cancel.")
         Thread {
+            var message = getString(R.string.saved)
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
-                CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
-                connection.connectTimeout = 10_000
-                connection.inputStream.use { input ->
-                    contentResolver.openOutputStream(destination, "w").use { output ->
-                        checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
-                    }
-                }
-                show(getString(R.string.saved))
-            } catch (e: Exception) {
-                show(getString(R.string.download_failed, e.message ?: e.toString()))
+                transfer.copy(request, {
+                    checkNotNull(contentResolver.openOutputStream(destination, "w")) { "Cannot open selected document" }
+                })
+            } catch (_: Exception) {
+                // ACTION_CREATE_DOCUMENT creates a new document; remove only that incomplete output.
+                val removed = try { DocumentsContract.deleteDocument(contentResolver, destination) } catch (_: Exception) { false }
+                message = if (transfer.cancelled) "Download canceled" else "Download failed; please retry"
+                if (!removed) message += "; remove the incomplete document from the selected folder"
+            } finally {
+                activeDownloads.remove(destination, transfer)
             }
-        }.apply { isDaemon = true }.start()
+            show(message)
+        }.apply { isDaemon = true; start() }
     }
 
     /**
@@ -338,14 +351,17 @@ class MainActivity : Activity() {
             maybeRequestBootstrapStorage()
             val error = OpenCodeHost.error
             val url = OpenCodeHost.pairingUrl
+            if (url != null && url != loadedUrl) {
+                loadedUrl = url
+                webView.loadUrl(url)
+            }
             when {
-                url != null -> {
-                    status.visibility = View.GONE
-                    if (url != loadedUrl) {
-                        loadedUrl = url
-                        webView.loadUrl(url)
-                    }
+                activeDownloads.isNotEmpty() -> {
+                    status.visibility = View.VISIBLE
+                    status.text = "Saving ${activeDownloads.size} download(s): ${activeDownloads.values.sumOf { it.bytesCopied }} bytes. Tap to cancel."
                 }
+                SystemClock.uptimeMillis() < noticeUntil -> Unit
+                url != null -> { status.visibility = View.GONE }
                 loadedUrl != null -> {
                     status.visibility = View.VISIBLE
                     status.text = getString(R.string.reconnecting)
@@ -365,6 +381,7 @@ class MainActivity : Activity() {
 
     private fun show(message: String) {
         handler.post {
+            noticeUntil = SystemClock.uptimeMillis() + NOTICE_MS
             status.visibility = View.VISIBLE
             status.text = message
             handler.postDelayed({ if (loadedUrl != null) status.visibility = View.GONE }, NOTICE_MS)
@@ -385,6 +402,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        activeDownloads.values.forEach { it.cancel() }
+        pendingDownloads.clear()
+        fileChooser?.onReceiveValue(null)
+        fileChooser = null
         handler.removeCallbacksAndMessages(null)
         webView.destroy()
         super.onDestroy()
@@ -395,7 +416,6 @@ class MainActivity : Activity() {
         const val RECONNECT_POLL_MS = 2_000L
         const val NOTICE_MS = 3_000L
         const val FILE_CHOOSER_REQUEST = 1
-        const val SAVE_FILE_REQUEST = 2
         const val STORAGE_PERMISSION_REQUEST = 3
         const val STORAGE_SETTINGS_REQUEST = 4
         const val STORAGE_ACTION = "com.termux.app.reload_style"
