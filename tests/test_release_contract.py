@@ -34,6 +34,24 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('white-space: pre;', patch)
         self.assertIn("settings.textZoom =", activity)
 
+    def test_termux_setup_storage_bridge(self):
+        manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        env = (ROOT / "app/src/main/java/com/termux/Termux.kt").read_text()
+        workflow = (ROOT / ".github/workflows/build-and-release.yml").read_text()
+
+        self.assertIn('android.permission.WRITE_EXTERNAL_STORAGE', manifest)
+        self.assertIn('android.permission.MANAGE_EXTERNAL_STORAGE', manifest)
+        self.assertIn('android:requestLegacyExternalStorage="true"', manifest)
+        self.assertIn('"com.termux.app.reload_style"', activity)
+        self.assertIn('Context.RECEIVER_NOT_EXPORTED', activity)
+        self.assertIn('Environment.isExternalStorageManager()', activity)
+        self.assertIn('Manifest.permission.WRITE_EXTERNAL_STORAGE', activity)
+        self.assertIn('File(Termux.HOME, "storage")', activity)
+        self.assertIn('Files.isSymbolicLink', activity)
+        self.assertIn('TERMUX__USER_ID" to (uid / 100_000).toString()', env)
+        self.assertIn('"bin/am"', workflow)
+
     def test_git_installed_with_bootstrap_and_safe_workspace(self):
         lock = (ROOT / "runtime.lock").read_text()
         host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()

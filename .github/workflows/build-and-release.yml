@@ -76,7 +76,7 @@ jobs:
           python3 - <<'PY'
           import zipfile
           with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
-              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg",
+              expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
                         "etc/termux/mirrors/default",
                         "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
@@ -185,7 +185,7 @@ jobs:
           python3 - "$RUNNER_TEMP/runtime.zip" "$RUNNER_TEMP/opencode.bin" <<'PY'
           import sys,zipfile
           with zipfile.ZipFile(sys.argv[1]) as z:
-              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/git","bin/rg",
+              required={"SYMLINKS.txt","bin/pkg","bin/apt","bin/dpkg","bin/bash","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
                         "var/lib/dpkg/status","lib/libc++_shared.so","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (required-set(z.namelist())), required-set(z.namelist())
               with open(sys.argv[2],"wb") as out: out.write(z.read("libexec/opencode/opencode.bin"))
