@@ -32,7 +32,8 @@ object RuntimeInstaller {
     private const val READY_FILE = ".opencodie-ready"
     private const val INSTALLING_FILE = ".opencodie-installing"
 
-    fun installIfNeeded(context: Context, log: (String) -> Unit) {
+    fun installIfNeeded(context: Context, log: (String) -> Unit, stage: (String) -> Unit = {}) {
+        stage("checking bootstrap recovery")
         val files = context.filesDir
         BootstrapJournal(files, ::bootstrapGroupAlive).recover()
         val prefix = File(files, "usr")
@@ -43,13 +44,21 @@ object RuntimeInstaller {
         val installed = ready.takeIf { it.isFile }?.readText()?.trim()
 
         if (installed == null) {
+            stage("verifying bundled archive")
             verifyChecksum(context)
+            stage("preparing first installation")
             val installId = InitialInstall(files).prepare()
+            stage("extracting Termux archive")
             bootstrap(context, prefix, staging, installId, log)
+            stage("preparing Termux directories")
             ensureDirectories(prefix)
+            stage("selecting Termux repository")
             selectDefaultMirror(prefix)
+            stage("configuring Termux packages")
             runSecondStage(prefix, log)
+            stage("writing initial configuration")
             writeOpenCodeConfig(context, log)
+            stage("committing first installation")
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
@@ -57,14 +66,19 @@ object RuntimeInstaller {
             return
         }
 
+        stage("checking existing Termux prefix")
         check(prefix.isDirectory) { "Verified Termux prefix missing: $prefix" }
         // If an interrupted upgrade left backup files, rollback before retry.
+        stage("recovering previous runtime upgrade")
         recoverUpgrade(files, prefix, installed == bundled, log)
         if (installed != bundled) {
+            stage("installing runtime update")
             log("Updating bundled OpenCode")
             upgrade(context, prefix, files)
         }
+        stage("preparing existing Termux directories")
         ensureDirectories(prefix)
+        stage("preserving OpenCode configuration")
         writeOpenCodeConfig(context, log)
         log("Runtime ready")
     }
