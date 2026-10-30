@@ -5,6 +5,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InitialConfigTest {
+    @Test fun interruptedPreparationNeverPublishesPartialConfigAndConcurrentConfigWins() {
+        val root = Files.createTempDirectory("config").toFile()
+        try {
+            val config = root.resolve("opencode.json")
+            try {
+                InitialConfig.writeIfAbsent(config, "generated") { throw java.io.IOException("interrupted") }
+                fail("Fault was not injected")
+            } catch (_: java.io.IOException) { }
+            assertFalse(config.exists())
+            assertFalse(InitialConfig.writeIfAbsent(config, "generated") { config.writeText("user choice") })
+            assertEquals("user choice", config.readText())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun customizedAndMalformedConfigsRemainByteIdentical() {
         val root = Files.createTempDirectory("config").toFile()
         try {
