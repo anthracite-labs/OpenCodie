@@ -61,6 +61,15 @@ The Android `versionName` is read from `OPENCODE_VERSION` in `runtime.lock`
   completion marker are **preserved and rejected**, never silently deleted.
   Back up any installation created by an older pre-marker build before upgrading.
 
+## Mobile shell output
+
+OpenCode's native mobile WebUI retains its existing command/output cards.
+On narrow screens the shell card has **Wrap** and **Expand** controls, with
+horizontal scrolling available for unwrapped terminal tables. System font
+scaling is applied through Android WebView, and the original copy controls
+remain available. This is a small patch against the pinned upstream WebUI,
+applied at build time; it adds no runtime dependencies.
+
 ## Signing and release
 
 The one-time GitHub Actions signing job generated a stable PKCS12 signing key and

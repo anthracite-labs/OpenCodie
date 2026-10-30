@@ -22,6 +22,18 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('"$APK#OpenCodie.apk"', workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
 
+    def test_mobile_shell_output_build_contract(self):
+        build = (ROOT / "scripts/build-opencode.sh").read_text()
+        patch = (ROOT / "patches/opencode-mobile-ui.patch").read_text()
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        self.assertIn("apply_patch opencode-mobile-ui.patch", build)
+        self.assertIn("function ConsoleOutput", patch)
+        self.assertIn("Wrap: On", patch)
+        self.assertIn("data-expanded", patch)
+        self.assertIn("max-height: 75dvh", patch)
+        self.assertIn('white-space: pre;', patch)
+        self.assertIn("settings.textZoom =", activity)
+
     def test_git_installed_with_bootstrap_and_safe_workspace(self):
         lock = (ROOT / "runtime.lock").read_text()
         host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()
