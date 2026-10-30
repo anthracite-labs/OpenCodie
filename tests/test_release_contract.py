@@ -43,7 +43,7 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('File(filesDir, ".opencodie-ready").isFile', activity)
         self.assertIn('getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)', activity)
         self.assertIn('putBoolean("storage_prompted", true).commit()', activity)
-        self.assertIn('if (!resumed)', activity)
+        self.assertIn('if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return', activity)
         self.assertIn('maybeRequestBootstrapStorage()', activity.split("private fun poll()", 1)[1])
         self.assertIn('requestStorageAccess()', activity.split("private fun maybeRequestBootstrapStorage()", 1)[1])
 
