@@ -91,6 +91,20 @@ The signing certificate fingerprint is recorded in
 Build and packaging CI checks do not replace testing the WebUI, PTY, package
 management and upgrade behavior on an Android device.
 
+## Mobile UI
+
+The pinned OpenCode WebUI is patched at build time (not injected at runtime)
+to improve the existing shell-output card on narrow screens. Wrap on/off
+preserves wide command tables, and Expand/Collapse adjusts the output area
+without changing the upstream shell-output retention limit. Copy actions
+remain unchanged. WebView follows Android's system font-size setting.
+
+The patch is `patches/opencode-mobile-ui.patch` and is applied by
+`scripts/build-opencode.sh`. No alternate WebUI or extra frontend dependency
+is installed. Check touch interaction, keyboard resizing, output wrapping,
+scrolling and text accessibility on an Android device before declaring the
+mobile UX verified.
+
 ## Known limitations
 
 - The bundled `@opentui/core` native renderer is upstream's musl build (its only
