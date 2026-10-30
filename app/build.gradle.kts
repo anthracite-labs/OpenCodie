@@ -1,9 +1,9 @@
-val openCodeVersion = rootProject.file("runtime.lock").useLines { lines ->
-    lines.first { it.startsWith("OPENCODE_VERSION=") }.substringAfter("=").removePrefix("v")
-}
-
 plugins {
     id("com.android.application")
+}
+
+val openCodeVersion = rootProject.file("runtime.lock").useLines { lines ->
+    lines.first { it.startsWith("OPENCODE_VERSION=") }.substringAfter("=").removePrefix("v")
 }
 
 android {
