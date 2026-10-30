@@ -1,5 +1,6 @@
 """Build-contract checks for the single Android release artifact."""
 from pathlib import Path
+import json
 import subprocess
 import unittest
 
@@ -106,6 +107,34 @@ class BuildContractTest(unittest.TestCase):
         installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
         self.assertIn("selectDefaultMirror(prefix)", installer)
         self.assertIn('"etc/termux/chosen_mirrors"', installer)
+
+
+    def test_malformed_opencode_config_is_preserved_and_reported(self):
+        """A corrupt opencode.json is kept for recovery, never silently dropped.
+
+        OpenCode refuses to start on invalid JSON and the install log said
+        nothing about why. A valid user-customised config (for example one with
+        an mcp.servers block) must still be left completely untouched.
+        """
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        self.assertIn("import org.json.JSONObject", installer)
+        # Valid configs short-circuit: user edits win.
+        self.assertIn("if (config.exists() && isJsonObject(config)) return", installer)
+        # Malformed configs are copied aside before the default is restored.
+        self.assertIn(".broken-", installer)
+        self.assertIn("copyTo(backup, overwrite = false)", installer)
+        self.assertIn("is not valid JSON", installer)
+
+    def test_default_opencode_config_is_valid_json(self):
+        """The embedded default must itself parse, or the installer writes the bug."""
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        body = installer.split("private fun defaultOpenCodeConfig() =", 1)[1]
+        literal = body.split('"""', 2)[1]
+        text = literal.replace("${'$'}", "$").replace("${Termux.PREFIX}", "/data/data/com.termux/files/usr")
+        parsed = json.loads(text)
+        self.assertEqual(parsed["shell"], "/data/data/com.termux/files/usr/bin/bash")
+        self.assertEqual(parsed["update"], "disable")
+        self.assertEqual(parsed["permissions"][0]["effect"], "ask")
 
 
 if __name__ == "__main__":

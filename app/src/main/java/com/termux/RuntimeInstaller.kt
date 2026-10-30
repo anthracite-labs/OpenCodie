@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
+import org.json.JSONObject
 
 /**
  * Provisioning of the Termux userspace bundled in the APK.
@@ -316,10 +317,22 @@ object RuntimeInstaller {
             log("Wrote ${instructions.path}")
         }
         val config = File(Termux.HOME, ".config/opencode/opencode.json")
-        if (config.exists()) return
+        if (config.exists() && isJsonObject(config)) return
+        if (config.exists()) {
+            // Invalid JSON makes OpenCode fail to start with no clue why. Keep the
+            // user's bytes for recovery, then restore a config that always loads.
+            val backup = File(config.parentFile, "${config.name}.broken-${System.currentTimeMillis()}")
+            config.copyTo(backup, overwrite = false)
+            log("Existing ${config.path} is not valid JSON; kept it at ${backup.path} and restored the default")
+        }
         config.parentFile?.mkdirs()
-        config.writeText(
-            """
+        config.writeText(defaultOpenCodeConfig())
+        log("Wrote ${config.path}")
+    }
+
+    /** A stock configuration OpenCode can always load. */
+    private fun defaultOpenCodeConfig() =
+        """
             {
               "${'$'}schema": "https://opencode.ai/config.json",
               "shell": "${Termux.PREFIX}/bin/bash",
@@ -333,9 +346,14 @@ object RuntimeInstaller {
               "update": "disable"
             }
 
-            """.trimIndent(),
-        )
-        log("Wrote ${config.path}")
+            """.trimIndent()
+
+    /** True when [file] holds a JSON object OpenCode can load. */
+    private fun isJsonObject(file: File): Boolean = try {
+        JSONObject(file.readText())
+        true
+    } catch (e: Exception) {
+        false
     }
 
     private fun asset(context: Context, name: String) =
