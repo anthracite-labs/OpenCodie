@@ -221,6 +221,31 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('source "$REPO_ROOT/scripts/lib.sh"', runtime)
         self.assertIn('checkout_pinned "$TERMUX" "$TERMUX_BOOTSTRAP_COMMIT"', runtime)
 
+    def test_session_leftovers_runtime_and_build(self):
+        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        self.assertIn("private fun writeInstructions(", installer)
+        self.assertIn("private fun writeDefaultConfig(", installer)
+        host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()
+        self.assertIn("attempts++", host)
+        self.assertIn("if (attempts < 20) 500 else 1_000", host)
+        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        self.assertIn("}.apply { isDaemon = true }.start()", activity)
+        self.assertIn("requestNotificationPermission()", activity)
+        self.assertIn("NOTIFICATION_PERMISSION_REQUEST", activity)
+        lock = (ROOT / "runtime.lock").read_text()
+        self.assertIn("PTY_MUSL_SHA256=", lock)
+        self.assertIn("PARCEL_WATCHER_SHA256=", lock)
+        build = (ROOT / "scripts/build-opencode.sh").read_text()
+        self.assertIn('expected_sha', build)
+        self.assertIn('sha256sum "$tmp"', build)
+        workflow = (ROOT / ".github/workflows/build-and-release.yml").read_text()
+        self.assertIn("Cache Bun toolchain", workflow)
+        self.assertIn("Cache Cargo registry", workflow)
+        self.assertIn("Cache Android NDK", workflow)
+        self.assertIn("scripts/lib.sh", workflow)
+        self.assertIn("build-tools;37.0.0", workflow)
+        self.assertNotIn("build-tools;36.0.0", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

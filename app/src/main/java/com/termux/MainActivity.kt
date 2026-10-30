@@ -118,7 +118,16 @@ class MainActivity : Activity() {
         })
 
         startForegroundService(Intent(this, OpenCodeService::class.java))
+        requestNotificationPermission()
         poll()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
+        }
     }
 
     private val client = object : WebViewClient() {
@@ -193,6 +202,7 @@ class MainActivity : Activity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) return
         if (requestCode != STORAGE_PERMISSION_REQUEST) return
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             setupStorageLinks()
@@ -274,7 +284,7 @@ class MainActivity : Activity() {
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
                 show("Storage setup failed: ${e.message}")
             }
-        }.start()
+        }.apply { isDaemon = true }.start()
     }
 
     /** Asks the platform picker where to save, then streams the loopback response there. */
@@ -390,6 +400,7 @@ class MainActivity : Activity() {
         const val SAVE_FILE_REQUEST = 2
         const val STORAGE_PERMISSION_REQUEST = 3
         const val STORAGE_SETTINGS_REQUEST = 4
+        const val NOTIFICATION_PERMISSION_REQUEST = 5
         const val STORAGE_ACTION = "com.termux.app.reload_style"
     }
 }

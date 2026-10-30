@@ -143,10 +143,13 @@ object OpenCodeHost {
     /** Polls /api/info until the server answers, then redeems a pairing code. */
     private fun awaitPairing(started: Process): String {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        var attempts = 0
         while (System.currentTimeMillis() < deadline) {
             if (!started.isAlive) throw IllegalStateException("OpenCode exited during startup:\n${log()}")
             if (statusCode("GET", "/api/info") == 200) return pairingURL()
-            Thread.sleep(500)
+            attempts++
+            // 500ms for ~10s, then 1s to cut wakeups during slow bootstrap.
+            Thread.sleep(if (attempts < 20) 500 else 1_000)
         }
         throw IllegalStateException("OpenCode did not become ready:\n${log()}")
     }

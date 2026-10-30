@@ -56,17 +56,26 @@ bun install --frozen-lockfile --os="*" --cpu="*" --libc="*"
 
 # Bun skips some os:android optionals even with --os="*"; fetch them verbatim.
 ensure_npm_package() {
-    local name="$1" version="$2" flat="node_modules/$1"
+    local name="$1" version="$2" expected_sha="$3" flat="node_modules/$1"
     if [ -d "$flat" ] || ls -d "node_modules/.bun/$(echo "$name" | sed 's@/@+@')@$version" >/dev/null 2>&1; then
         return 0
     fi
+    test -n "$expected_sha" || { echo "missing sha256 for $name@$version" >&2; exit 1; }
     echo "fetching $name@$version from npm"
     mkdir -p "$flat"
-    curl -fsSL "https://registry.npmjs.org/$name/-/$(basename "$name")-$version.tgz" |
-        tar xz -C "$flat" --strip-components=1
+    tmp="$(mktemp)"
+    curl -fsSL "https://registry.npmjs.org/$name/-/$(basename "$name")-$version.tgz" -o "$tmp"
+    actual="$(sha256sum "$tmp" | cut -d' ' -f1)"
+    test "$actual" = "$expected_sha" || {
+        echo "$name@$version checksum mismatch: got $actual want $expected_sha" >&2
+        rm -f "$tmp"
+        exit 1
+    }
+    tar xz -C "$flat" --strip-components=1 -f "$tmp"
+    rm -f "$tmp"
 }
-ensure_npm_package "@parcel/watcher-android-arm64" "$PARCEL_WATCHER_VERSION"
-ensure_npm_package "@opencode/pty-linux-arm64-musl" "$PTY_VERSION"
+ensure_npm_package "@parcel/watcher-android-arm64" "$PARCEL_WATCHER_VERSION" "$PARCEL_WATCHER_SHA256"
+ensure_npm_package "@opencode/pty-linux-arm64-musl" "$PTY_VERSION" "$PTY_MUSL_SHA256"
 
 echo "==> native PTY binding"
 bash "$REPO_ROOT/scripts/build-natives.sh" "$UPSTREAM"

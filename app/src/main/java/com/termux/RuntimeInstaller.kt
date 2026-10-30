@@ -300,22 +300,29 @@ object RuntimeInstaller {
 
     /** Initial OpenCode configuration; later user edits are preserved. */
     private fun writeOpenCodeConfig(log: (String) -> Unit) {
+        writeInstructions(log)
+        writeDefaultConfig(log)
+    }
+
+    private fun writeInstructions(log: (String) -> Unit) {
         // Stock OpenCode global instructions; never overwrite the user's edits.
         val instructions = File(Termux.HOME, ".config/opencode/AGENTS.md")
-        if (!instructions.exists()) {
-            instructions.parentFile?.mkdirs()
-            instructions.writeText(
-                """
-                # OpenCodie Android environment
+        if (instructions.exists()) return
+        instructions.parentFile?.mkdirs()
+        instructions.writeText(
+            """
+            # OpenCodie Android environment
 
-                - This is native Termux on Android. Use pkg, never sudo, to install Termux packages.
-                - The OpenCode shell tool is noninteractive: use `pkg install -y PACKAGE` for requested installs. Never claim success before checking the exit status.
-                - Create Git repositories inside named project directories under ~/projects; never initialize Git in ~ or ~/projects itself.
-                - If a long-running command is backgrounded, verify its eventual outcome before reporting success.
-                """.trimIndent() + "\n",
-            )
-            log("Wrote ${instructions.path}")
-        }
+            - This is native Termux on Android. Use pkg, never sudo, to install Termux packages.
+            - The OpenCode shell tool is noninteractive: use `pkg install -y PACKAGE` for requested installs. Never claim success before checking the exit status.
+            - Create Git repositories inside named project directories under ~/projects; never initialize Git in ~ or ~/projects itself.
+            - If a long-running command is backgrounded, verify its eventual outcome before reporting success.
+            """.trimIndent() + "\n",
+        )
+        log("Wrote ${instructions.path}")
+    }
+
+    private fun writeDefaultConfig(log: (String) -> Unit) {
         val config = File(Termux.HOME, ".config/opencode/opencode.json")
         if (config.exists() && isJsonObject(config)) return
         if (config.exists()) {
