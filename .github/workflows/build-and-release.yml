@@ -121,6 +121,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Install pinned Android SDK for unit tests
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;37.0.0'
+          test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
       - name: Run unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Run Python release-contract tests
@@ -129,7 +136,7 @@ jobs:
   apk:
     name: Assemble, verify and optionally release APK
     runs-on: ubuntu-24.04
-    needs: runtime
+    needs: [runtime, unit-tests]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
