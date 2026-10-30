@@ -112,7 +112,7 @@ object OpenCodeHost {
 
     private fun launch(context: Context): Process {
         password = storedPassword(context)
-        val workspace = File(Termux.HOME, "projects")
+        val workspace = File(Termux.HOME, "projects/workspace")
         check(workspace.isDirectory || workspace.mkdirs()) { "Cannot create project workspace: $workspace" }
         val command = "exec ${Termux.PREFIX}/bin/opencode serve --hostname $HOST --port $PORT"
         val builder = ProcessBuilder("${Termux.PREFIX}/bin/bash", "-lc", command)
