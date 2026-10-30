@@ -30,6 +30,7 @@ object OpenCodeHost {
     @Volatile var status = "Starting"
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
+    @Volatile var retryAvailable = false
 
     private var appContext: Context? = null
     private val supervisor = HostSupervisor { token -> supervise(checkNotNull(appContext), token) }
@@ -46,10 +47,20 @@ object OpenCodeHost {
 
     fun stop() = supervisor.stop()
 
+    fun retry(context: Context) {
+        if (!retryAvailable) return
+        supervisor.stop()
+        start(context)
+    }
+
     private fun supervise(context: Context, token: HostSupervisor.Cancellation) {
+        retryAvailable = false
+        error = null
         try {
             RuntimeInstaller.installIfNeeded(context) { status = it }
         } catch (e: Exception) {
+            if (e is ChildProcess.Unterminated) token.restartAllowed = false
+            retryAvailable = e is java.io.IOException
             fail("Could not prepare the Termux runtime", e)
             return
         }

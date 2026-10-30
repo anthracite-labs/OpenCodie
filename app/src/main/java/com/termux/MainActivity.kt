@@ -94,6 +94,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.WHITE)
+            setOnClickListener { if (OpenCodeHost.retryAvailable) OpenCodeHost.retry(this@MainActivity) }
         }
         webView = WebView(this).apply {
             settings.allowFileAccess = false
@@ -351,7 +352,7 @@ class MainActivity : Activity() {
                 }
                 error != null -> {
                     status.visibility = View.VISIBLE
-                    status.text = getString(R.string.failed, error)
+                    status.text = getString(R.string.failed, error) + if (OpenCodeHost.retryAvailable) "\nTap to retry." else ""
                 }
                 else -> {
                     status.visibility = View.VISIBLE
