@@ -125,7 +125,13 @@ class MainActivity : Activity() {
         poll()
     }
 
-    /** File access follows explicit storage permission; file-URL access stays off. */
+    /** Content access follows explicit storage permission; file access stays off.
+     *
+     * WebView loads only the loopback HTTP UI; upload/download use native
+     * pickers + backend. No verified feature needs file:// URLs, and
+     * allowFileAccess also exposes app-private files — so it stays false.
+     * allowContentAccess is gated because picker results are content:// URIs.
+     */
     private fun hasStoragePermission(): Boolean =
         if (Build.VERSION.SDK_INT >= 30) {
             Environment.isExternalStorageManager()
@@ -135,9 +141,8 @@ class MainActivity : Activity() {
 
     private fun updateWebViewFileAccess() {
         if (!::webView.isInitialized) return
-        val granted = hasStoragePermission()
-        webView.settings.allowFileAccess = granted
-        webView.settings.allowContentAccess = granted
+        webView.settings.allowFileAccess = false
+        webView.settings.allowContentAccess = hasStoragePermission()
         // Never enable file-URL inheritance: blocks file:// exfiltration.
         webView.settings.allowFileAccessFromFileURLs = false
         webView.settings.allowUniversalAccessFromFileURLs = false
@@ -397,7 +402,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startForResultSafely(intent: Intent, requestCode: Int, onMissing: () -> Unit): Boolean {
+    private fun startForResultSafely(intent: Intent, requestCode: Int, onMissing: () -> Unit = {}): Boolean {
         return try {
             startActivityForResult(intent, requestCode)
             true

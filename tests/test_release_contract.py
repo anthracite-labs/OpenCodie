@@ -197,7 +197,7 @@ class BuildContractTest(unittest.TestCase):
 
     def test_webview_hardening_disables_file_access(self):
         activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
-        # Secure default, then permission-gated enable.
+        # Secure default, content-only gating: file:// never enabled.
         self.assertIn("settings.allowFileAccess = false", activity)
         self.assertIn("settings.allowContentAccess = false", activity)
         self.assertIn("settings.allowFileAccessFromFileURLs = false", activity)
@@ -205,7 +205,9 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("settings.safeBrowsingEnabled = true", activity)
         self.assertIn("private fun hasStoragePermission()", activity)
         self.assertIn("private fun updateWebViewFileAccess()", activity)
-        self.assertIn("webView.settings.allowFileAccess = granted", activity)
+        self.assertIn("webView.settings.allowFileAccess = false", activity)
+        self.assertIn("webView.settings.allowContentAccess = hasStoragePermission()", activity)
+        self.assertIn("onMissing: () -> Unit = {}", activity)
         self.assertIn("updateWebViewFileAccess()", activity)
         self.assertIn("startForResultSafely", activity)
 
@@ -256,10 +258,13 @@ class BuildContractTest(unittest.TestCase):
     def test_config_merge_preserves_mcp(self):
         installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
         self.assertIn("private fun mergeMissingDefaults(", installer)
-        self.assertIn("if (!current.has(key))", installer)
+        self.assertIn('for (key in listOf("\\$schema", "shell"))', installer)
+        self.assertIn("private fun atomicWriteText(", installer)
+        self.assertIn(".tmp-", installer)
+        self.assertIn("renameTo(target)", installer)
         self.assertIn(".pre-merge-", installer)
-        # Never overwrite user values: only absent keys added.
-        self.assertIn("Existing values — including a customized `shell` — win", installer)
+        # Policy keys untouched: omission keeps upstream default.
+        self.assertNotIn('"permissions"', installer.split("private fun mergeMissingDefaults(", 1)[1].split("private fun atomicWriteText(", 1)[0].replace('"$schema"', '').replace('"shell"', ''))
         # Malformed path still backs up separately.
         self.assertIn(".broken-", installer)
 

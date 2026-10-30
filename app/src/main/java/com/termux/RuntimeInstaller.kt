@@ -340,12 +340,13 @@ object RuntimeInstaller {
         log("Wrote ${config.path}")
     }
 
-    /** Add missing stock keys to a valid user config; never overwrite user values.
+    /** Add missing launch-critical keys to a valid user config; never overwrite.
      *
      * Preserves `mcp.servers.*` and any other custom keys byte-for-byte when
-     * nothing is missing (no write). When keys are missing, backs up first,
-     * then adds only the absent stock keys (`$schema`, `shell`, `permissions`,
-     * `update`). Existing values — including a customized `shell` — win.
+     * nothing is missing (no write). Only `$schema` and `shell` are merged:
+     * `shell` is required to launch, policy keys (`permissions`, `update`)
+     * are intentionally left alone so an omission keeps OpenCode's own
+     * default instead of inheriting ours. Existing values win.
      */
     private fun mergeMissingDefaults(config: File, log: (String) -> Unit) {
         val current = try {
@@ -355,7 +356,7 @@ object RuntimeInstaller {
         }
         val defaults = JSONObject(defaultOpenCodeConfig())
         var changed = false
-        for (key in defaults.keys()) {
+        for (key in listOf("\$schema", "shell")) {
             if (!current.has(key)) {
                 current.put(key, defaults.get(key))
                 changed = true
@@ -364,8 +365,20 @@ object RuntimeInstaller {
         if (!changed) return
         val backup = File(config.parentFile, "${config.name}.pre-merge-${System.currentTimeMillis()}")
         config.copyTo(backup, overwrite = false)
-        config.writeText(current.toString(2) + "\n")
+        atomicWriteText(config, current.toString(2) + "\n")
         log("Merged missing defaults into ${config.path}; backup at ${backup.path}")
+    }
+
+    /** Crash-safe write: temp file in same dir, then atomic rename. */
+    private fun atomicWriteText(target: File, text: String) {
+        target.parentFile?.mkdirs()
+        val tmp = File(target.parentFile, "${target.name}.tmp-${System.currentTimeMillis()}")
+        try {
+            tmp.writeText(text)
+            check(tmp.renameTo(target)) { "Could not replace ${target.path}" }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
     }
 
     /** A stock configuration OpenCode can always load. */
