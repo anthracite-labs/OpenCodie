@@ -31,33 +31,22 @@ object OpenCodeHost {
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
 
-    private var supervisor: Thread? = null
+    private var appContext: Context? = null
+    private val supervisor = HostSupervisor { token -> supervise(checkNotNull(appContext), token) }
 
-    @Volatile private var stopping = false
-    @Volatile private var process: Process? = null
     private var password: String = ""
     private val output = StringBuilder()
 
-    /** Starts the supervisor once; repeated calls (service restarts) are ignored. */
+    /** Start/stop return promptly; the old thread acknowledges shutdown before replacement. */
     @Synchronized
     fun start(context: Context) {
-        if (supervisor?.isAlive == true) return
-        stopping = false
-        val app = context.applicationContext
-        supervisor = Thread { supervise(app) }.apply {
-            isDaemon = true
-            start()
-        }
+        appContext = context.applicationContext
+        supervisor.start()
     }
 
-    @Synchronized
-    fun stop() {
-        stopping = true
-        process?.destroy()
-        process = null
-    }
+    fun stop() = supervisor.stop()
 
-    private fun supervise(context: Context) {
+    private fun supervise(context: Context, token: HostSupervisor.Cancellation) {
         try {
             RuntimeInstaller.installIfNeeded(context) { status = it }
         } catch (e: Exception) {
@@ -66,44 +55,45 @@ object OpenCodeHost {
         }
 
         var backoff = 2_000L
-        while (!stopping) {
+        while (!token.cancelled) {
             var started: Process? = null
             try {
                 status = "Starting OpenCode"
                 error = null
                 pairingUrl = null
                 started = launch(context)
-                process = started
+                token.attach(started)
+                if (token.cancelled) break
                 status = "Waiting for OpenCode"
-                pairingUrl = awaitPairing(started)
+                pairingUrl = awaitPairing(started, token)
                 status = "Ready"
                 backoff = 2_000L
                 val code = started.waitFor()
-                if (stopping) break
+                if (token.cancelled) break
                 Log.w(TAG, "OpenCode exited with $code")
                 status = "OpenCode stopped (exit $code), restarting"
             } catch (e: Exception) {
-                if (!stopping) fail("OpenCode stopped", e)
+                if (!token.cancelled) fail("OpenCode stopped", e)
             } finally {
                 // A failed readiness/pairing attempt must not leave a server
                 // holding the loopback port when the supervisor retries.
                 started?.let { child ->
-                    if (child.isAlive) {
-                        child.destroy()
-                        if (!child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                            child.destroyForcibly()
-                            child.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
-                        }
+                    try {
+                        ChildProcess.terminate(child)
+                    } catch (e: Exception) {
+                        // Refuse a second owner if the old process cannot be confirmed dead.
+                        token.restartAllowed = false
+                        fail("Could not stop the local server; restart the app", e)
+                        return
                     }
                 }
-                process = null
                 pairingUrl = null
             }
-            if (stopping) break
+            if (token.cancelled) break
             try {
                 Thread.sleep(backoff)
             } catch (_: InterruptedException) {
-                if (stopping) break
+                if (token.cancelled) break
             }
             backoff = (backoff * 2).coerceAtMost(30_000L)
         }
@@ -141,9 +131,9 @@ object OpenCodeHost {
     }
 
     /** Polls /api/info until the server answers, then redeems a pairing code. */
-    private fun awaitPairing(started: Process): String {
+    private fun awaitPairing(started: Process, token: HostSupervisor.Cancellation): String {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
+        while (!token.cancelled && System.currentTimeMillis() < deadline) {
             if (!started.isAlive) throw IllegalStateException("OpenCode exited during startup:\n${log()}")
             if (statusCode("GET", "/api/info") == 200) return pairingURL()
             Thread.sleep(500)

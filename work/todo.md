@@ -42,7 +42,7 @@ Read [plan.md](plan.md) before starting. Baseline: `fd513e8b21dfecf2b19b6cb61439
 | T01 | policy + atomic creation | Old generated config: external_directory was allow, expected ask (`work/t01-red.log`) | Pinned V2 schema/matcher PASS; config byte/symlink preservation tests + debug build PASS | Device approval/project workflow still pending |
 | T02 | exact origin + NSC | LocalOrigin trust-boundary regression fails before helper exists (`work/t02-red.log`) | Exact-origin JVM cases, debug APK and Android test APK PASS (`work/t02-build.log`) | Device pairing/upload/redirect/subresource checks pending; content access retained for picker |
 | T03 | verified inputs + signed APT patch | Downloader missing; altered archive/index tests fail before verification helper | Python 10/10 PASS; shell syntax PASS; bootstrap patch applies to pinned source; genuine Bun archive verified | Fresh runtime build blocked by Termux repository access; NDK vendor publishes legacy SHA-1, stronger provenance review outstanding |
-| T04 | — | — | — | — |
+| T04 | serial owner | Deterministic old-owner/stop/start test fails: requested restart lost (`work/t04-red.log`) | Shutdown acknowledgment/idempotence JVM tests + integrated debug build PASS (`work/t04-build.log`) | Child cleanup fails closed; real device process crash/stress remains pending |
 | T05 | — | — | — | — |
 | T06 | — | — | — | — |
 | T07 | — | — | — | — |
