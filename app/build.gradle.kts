@@ -52,3 +52,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    // Minimal unit-test framework for timeout/regression tests.
+    // Instrumentation tests are intentionally not added: pure-JVM tests with
+    // injected fakes keep the suite runnable without a device or emulator.
+    testImplementation("junit:junit:4.13.2")
+}
