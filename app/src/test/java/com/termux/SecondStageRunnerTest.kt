@@ -324,4 +324,81 @@ class SecondStageRunnerTest {
         assertEquals("v1\n", installing.readText())
         assertEquals("keep me\n", user.readText())
     }
+
+    /**
+     * Models an exited bootstrap parent whose descendant still holds stdout
+     * open. Closing Process.inputStream may itself block waiting for a reader
+     * lock, so neither the pipe drain nor closeStreams may outlive the deadline.
+     */
+    @Test(timeout = 15_000L)
+    fun exitedParentWithInheritedOutputPipe_returnsWithoutBlockingCleanup() {
+        class HeldPipe : ControlledProcess {
+            private val read = PipedInputStream(65_536)
+            private val write = PipedOutputStream(read)
+            private val release = CountDownLatch(1)
+            private val descendant = Thread {
+                try {
+                    write.write("parent exited\\n".toByteArray())
+                    write.flush()
+                    release.await()
+                } catch (_: Exception) {
+                    // Test teardown releases the simulated descendant.
+                } finally {
+                    runCatching { write.close() }
+                }
+            }.apply { isDaemon = true; start() }
+
+            override val isAlive: Boolean get() = false
+            override fun waitFor(timeout: Long, unit: TimeUnit): Boolean = true
+            override fun exitValue(): Int = 0
+            override fun destroy() {}
+            override fun destroyForcibly() {}
+            override val output: InputStream get() = read
+
+            override fun closeStreams() {
+                // Reproduce a synchronous pipe close blocked by a living descendant.
+                release.await()
+                read.close()
+            }
+
+            fun releaseDescendant() {
+                release.countDown()
+                descendant.join(1_000L)
+                runCatching { read.close() }
+            }
+        }
+
+        val proc = HeldPipe()
+        val (r, _) = runnerForProcess(proc, timeoutMs = 350L)
+        var outcome: SecondStageResult? = null
+        var failure: Throwable? = null
+        val worker = Thread {
+            try {
+                outcome = r.run(listOf("bash", "second-stage.sh"), tmp.root, emptyMap()) {}
+            } catch (t: Throwable) {
+                failure = t
+            }
+        }.apply { isDaemon = true; start() }
+
+        try {
+            worker.join(5_000L)
+            assertFalse("bootstrap runner must not hang while closing inherited stdout", worker.isAlive)
+            assertTrue("unexpected runner failure: $failure", failure == null)
+            assertTrue("inherited-open pipe must not count as successful bootstrap: $outcome",
+                outcome is SecondStageResult.TimedOut)
+        } finally {
+            proc.releaseDescendant()
+            worker.join(2_000L)
+        }
+    }
+
+    private fun runnerForProcess(
+        process: ControlledProcess,
+        timeoutMs: Long,
+    ): Pair<SecondStageRunner, ProcessLauncher> {
+        val launcher = object : ProcessLauncher {
+            override fun start(command: List<String>, workdir: File, env: Map<String, String>) = process
+        }
+        return SecondStageRunner(launcher, TestClock(), timeoutMs) to launcher
+    }
 }
