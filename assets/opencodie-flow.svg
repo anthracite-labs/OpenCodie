@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="204" viewBox="0 0 900 204" role="img" aria-label="Install APK, bootstrap the Termux and OpenCode runtime, then code in Android">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111d31"/><stop offset="1" stop-color="#1a3348"/></linearGradient></defs>
+<rect x="2" y="2" width="896" height="200" rx="27" fill="url(#bg)" stroke="#35516b" stroke-width="3"/>
+<g fill="#1a2d42" stroke="#3d6278" stroke-width="2"><rect x="25" y="27" width="254" height="150" rx="20"/><rect x="323" y="27" width="254" height="150" rx="20"/><rect x="621" y="27" width="254" height="150" rx="20"/></g>
+<g fill="none" stroke="#5be0ce" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><rect x="47" y="57" width="42" height="65" rx="8"/><path d="M61 111h14"/><path d="M348 72l13 12-13 12m28 0h17"/><path d="M643 90l14 13-14 13m28 0h19"/></g>
+<g fill="#f2fbff" font-family="Arial, sans-serif" font-size="19" font-weight="700"><text x="111" y="82">Install APK</text><text x="405" y="82">Auto setup</text><text x="703" y="82">Code with AI</text></g>
+<g fill="#b7cbd9" font-family="Arial, sans-serif" font-size="13.5"><text x="111" y="109">Android 10+ · ARM64</text><text x="405" y="109">Termux + OpenCode</text><text x="703" y="109">Local Web UI</text></g>
+<g stroke="#68e9d8" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M288 101h25m-9-9 9 9-9 9"/><path d="M586 101h25m-9-9 9 9-9 9"/></g>
+<text x="450" y="191" text-anchor="middle" fill="#9eb5c4" font-family="Arial, sans-serif" font-size="12">From download to a working on-device coding workspace</text>
+</svg>
