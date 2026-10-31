@@ -12,11 +12,13 @@
 
 <p><strong>What if your phone could host its own OpenCode server?</strong></p>
 
-<p><strong>📱 Run OpenCode on Android with a bundled Termux environment and an integrated coding interface—without installing Termux separately. ⚡</strong></p>
+<p><strong>📱 Run OpenCode and a Termux-powered development environment on Android—one ARM64 APK, no separate Termux install. ⚡</strong></p>
 
-<img src="assets/opencodie-hero.svg" alt="OpenCodie pocket workstation: Android phone running the OpenCode interface, with a terminal and project files" width="900">
+<img src="assets/opencodie-hero.svg" alt="Illustration of the OpenCodie Android coding workspace, showing the OpenCode interface and project files" width="900">
 
-<p><a href="https://github.com/anthracite-labs/OpenCodie/releases"><strong>Download OpenCodie.apk</strong></a> · <a href="#-quick-start">Quick start</a> · <a href="#-build-from-source">Build from source</a> · <a href="https://github.com/anthracite-labs/OpenCodie/issues">Report an issue</a></p>
+<sub>Concept illustration; the app displays OpenCode's Web UI.</sub>
+
+<p><a href="https://github.com/anthracite-labs/OpenCodie/releases"><strong>Get OpenCodie.apk (Releases)</strong></a> · <a href="#-quick-start">Quick start</a> · <a href="#-build-from-source">Build from source</a> · <a href="https://github.com/anthracite-labs/OpenCodie/issues">Report an issue</a></p>
 
 </div>
 
@@ -32,6 +34,17 @@
 **The result:** Work with project files, Git, shell commands, and an AI coding assistant from your Android device—without assembling the runtime yourself.
 
 > **1 APK** · **Android 10+** · **ARM64** · **OpenCode v2.2.2** (pinned in [`runtime.lock`](runtime.lock))
+
+### What one APK takes care of
+
+| Setup step | Assembling it yourself | With OpenCodie |
+| --- | --- | --- |
+| Android development userspace | Prepare a compatible Termux environment | Termux environment is bundled and initialized on first launch |
+| OpenCode server | Build or obtain an Android-compatible OpenCode runtime and start it | Pinned OpenCode runtime with a supervised local server |
+| Coding interface | Open the server interface separately | Web UI opens inside the Android app |
+| AI provider | Configure a supported model/provider | **Still required:** configure a supported model/provider |
+
+This compares setup steps, not model quality, coding capability, or performance.
 
 ### Contents
 
@@ -49,7 +62,11 @@
 
 ![First launch: download, bootstrap, connect an AI provider, and start coding](assets/first-launch.svg)
 
-**Requirements:** Android **10+** (API 29+) on an **ARM64 / aarch64** device; enough space for the approximately 153 MiB download and the extracted runtime; and access to an AI model/provider supported by OpenCode. Provider credentials and internet access may be required.
+**Before installing:**
+
+- **Device:** Android **10+** (API 29+) with an **ARM64 / aarch64** CPU.
+- **Storage:** Approximately **153 MiB** for the APK, plus space for the extracted runtime.
+- **AI access:** A model/provider supported by OpenCode. The APK includes **no free or offline AI model**; credentials, network access, and charges depend on the provider.
 
 1. Visit [GitHub Releases](https://github.com/anthracite-labs/OpenCodie/releases), select the newest suitable build, and download **`OpenCodie.apk`**. Builds may be labeled *pre-release*.
 2. Install the APK through Android's package installer. If prompted, permit installs from the browser or file manager you used. **Read the Termux compatibility warning above first.**
@@ -63,7 +80,7 @@ Create a Python hello-world project in ~/projects/workspace/hello,
 explain the files, then run it and show me the output.
 ```
 
-OpenCodie includes the runtime, **not a free or offline AI model**. Model connectivity, credentials, costs, and availability depend on the provider you choose.
+**What success looks like:** OpenCode creates the `hello` project under `~/projects/workspace`, explains its files, and runs it through its shell tooling. This checks model access, project-file creation, and command execution together.
 
 ## ✨ What is included
 
@@ -140,6 +157,7 @@ Python release-contract tests cover packaging and configuration invariants. JVM 
 | Shared folders are missing | Grant storage permission if desired and retry `termux-setup-storage` via shell tooling |
 | `sudo` is unavailable | Use Termux's `pkg` package manager |
 | AI operations fail | Provider selection, credentials, network access, and provider availability |
+| First project or shell command fails | Inspect the shell-tool output and confirm the project path is under `~/projects/workspace` |
 
 **Security:** The local server binds to loopback and uses a per-install generated password. Requests to external model providers can still leave the device. Review shell permissions before approving agent actions.
 
