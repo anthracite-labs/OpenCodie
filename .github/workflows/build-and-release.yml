@@ -99,6 +99,7 @@ jobs:
           with zipfile.ZipFile("app/src/main/assets/runtime-aarch64.zip") as z:
               expected={"SYMLINKS.txt","bin/bash","bin/pkg","bin/apt","bin/dpkg","bin/git","bin/rg","bin/am","bin/termux-setup-storage",
                         "etc/termux/mirrors/default",
+                        "share/doc/opencodie/LICENSE", "share/doc/opencodie/THIRD_PARTY_NOTICES.md",
                         "var/lib/dpkg/status","bin/opencode","libexec/opencode/opencode.bin"}
               assert not (expected-set(z.namelist())), expected-set(z.namelist())
               assert z.testzip() is None

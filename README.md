@@ -130,6 +130,19 @@ management and upgrade behavior on an Android device.
   exact warning, verify the APK's signing certificate and distribute from a
   trusted release channel.
 
+## License and third-party software
+
+OpenCodie-owned code and build/patch material is provided under the
+[MIT License](LICENSE). That license does **not** relicense the bundled
+OpenCode, Bun, Termux packages, native dependencies or imported agent skills;
+see [Third-party notices](THIRD_PARTY_NOTICES.md) for identified components,
+their licenses and remaining release-compliance obligations.
+
+The APK installs copies of `LICENSE` and `THIRD_PARTY_NOTICES.md` at
+`$PREFIX/share/doc/opencodie/`, alongside the Termux package copyright files
+under `$PREFIX/share/doc/`. OpenCodie is an independent community project;
+it is **not affiliated with or endorsed by** the upstream OpenCode team.
+
 ## Credits
 
 The Android build pipeline (`scripts/check-elf.sh`, `scripts/patch-opentui-loader.py`,

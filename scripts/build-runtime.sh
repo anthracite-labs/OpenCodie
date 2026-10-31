@@ -56,6 +56,11 @@ mkdir -p "$STAGE/libexec/opencode" "$STAGE/etc/opencode-apk"
 install -m 755 "$DIST/opencode/opencode" "$STAGE/bin/opencode"
 install -m 755 "$DIST/opencode/opencode.bin" "$STAGE/libexec/opencode/opencode.bin"
 printf '%s\n' "$OPENCODE_VERSION" >"$STAGE/etc/opencode-apk/version"
+# Ship OpenCodie's license and third-party notices alongside Termux's own
+# per-package copyright files so APK recipients have an offline copy.
+mkdir -p "$STAGE/share/doc/opencodie"
+install -m 644 "$REPO_ROOT/LICENSE" "$STAGE/share/doc/opencodie/LICENSE"
+install -m 644 "$REPO_ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/share/doc/opencodie/THIRD_PARTY_NOTICES.md"
 
 echo "==> archive"
 rm -f "$ARCHIVE"

@@ -279,5 +279,29 @@ class BuildContractTest(unittest.TestCase):
             self.assertIn(bullet, installer)
 
 
+    def test_project_license_and_third_party_notices_are_shipped(self):
+        license_text = (ROOT / "LICENSE").read_text()
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
+        self.assertIn("MIT License", license_text)
+        self.assertIn("Copyright (c) 2026 anthracite-labs", license_text)
+        for component in (
+            "OpenCode", "Bun", "Termux", "OpenTUI", "bun-pty",
+            "@parcel/watcher", "Astreele", "addyosmani/agent-skills",
+            "oil-oil/beautify-github-readme", "s1dashu/ip-as-logo-skill",
+        ):
+            self.assertIn(component, notices)
+
+        runtime = (ROOT / "scripts/build-runtime.sh").read_text()
+        self.assertIn(
+            'install -m 644 "$REPO_ROOT/LICENSE" "$STAGE/share/doc/opencodie/LICENSE"',
+            runtime,
+        )
+        self.assertIn(
+            'install -m 644 "$REPO_ROOT/THIRD_PARTY_NOTICES.md" '
+            '"$STAGE/share/doc/opencodie/THIRD_PARTY_NOTICES.md"',
+            runtime,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
