@@ -18,6 +18,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams
@@ -47,6 +48,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
+    private var observedServerPairing: String? = null
+    private var nextPairingAttemptAtMs = 0L
     private var fileChooser: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
     private var resumed = false
@@ -166,6 +169,13 @@ class MainActivity : Activity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             status.visibility = View.GONE
+            // Persist the browser-issued session cookie before the next Activity
+            // instance needs it. Do the synchronous flush off the UI thread.
+            if (url.startsWith("http://${OpenCodeHost.HOST}:${OpenCodeHost.PORT}/") &&
+                !url.contains("/auth/connect/")
+            ) {
+                Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
+            }
         }
 
         /** The supervisor restarts a dead server; keep the user informed meanwhile. */
@@ -173,6 +183,10 @@ class MainActivity : Activity() {
             if (!request.isForMainFrame) return
             status.visibility = View.VISIBLE
             status.text = getString(R.string.reconnecting)
+            // An old WebView load may fail after a server restart; allow a new
+            // session check without replaying any consumed pairing URL.
+            observedServerPairing = null
+            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
         }
     }
 
@@ -353,20 +367,59 @@ class MainActivity : Activity() {
     }
 
     /**
-     * The WebUI is served only once the server is ready. Keep watching
-     * afterwards so a restarted server is picked up again.
+     * The server publishes one startup pairing link as a readiness marker.
+     * It is single-use, so a new Activity must NOT load it directly. Instead,
+     * validate persisted WebView cookies or mint a fresh pairing link.
+     */
+    private fun openWebUiForServer(serverPairingLink: String) {
+        status.visibility = View.VISIBLE
+        status.text = getString(R.string.reconnecting)
+        Thread {
+            val root = "http://${OpenCodeHost.HOST}:${OpenCodeHost.PORT}/"
+            val destination = runCatching {
+                WebUiSessionSelector(
+                    rootUrl = root,
+                    readCookies = { CookieManager.getInstance().getCookie(root) },
+                    verifySession = { cookies -> OpenCodeHost.hasValidWebSession(cookies) },
+                    newPairingLink = { OpenCodeHost.freshPairingUrl() },
+                ).destinationUrl()
+            }
+            handler.post {
+                // The server may have restarted while the background request
+                // was in flight. Never load a link minted by an older server.
+                if (isDestroyed || isFinishing || OpenCodeHost.pairingUrl != serverPairingLink) {
+                    return@post
+                }
+                destination.onSuccess { target ->
+                    loadedUrl = target
+                    webView.loadUrl(target)
+                }.onFailure {
+                    observedServerPairing = null
+                    nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
+                    status.visibility = View.VISIBLE
+                    status.text = getString(R.string.reconnecting)
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Keep watching for server restarts without ever replaying a spent link.
+     * A fresh Activity always performs its own session selection.
      */
     private fun poll() {
         handler.postDelayed({
+            if (isDestroyed || isFinishing) return@postDelayed
             maybeRequestBootstrapStorage()
             val error = OpenCodeHost.error
-            val url = OpenCodeHost.pairingUrl
+            val serverPairingLink = OpenCodeHost.pairingUrl
             when {
-                url != null -> {
-                    status.visibility = View.GONE
-                    if (url != loadedUrl) {
-                        loadedUrl = url
-                        webView.loadUrl(url)
+                serverPairingLink != null -> {
+                    if (serverPairingLink != observedServerPairing &&
+                        SystemClock.elapsedRealtime() >= nextPairingAttemptAtMs
+                    ) {
+                        observedServerPairing = serverPairingLink
+                        openWebUiForServer(serverPairingLink)
                     }
                 }
                 loadedUrl != null -> {
@@ -426,6 +479,7 @@ class MainActivity : Activity() {
     private companion object {
         const val POLL_MS = 400L
         const val RECONNECT_POLL_MS = 2_000L
+        const val PAIR_RETRY_MS = 2_000L
         const val NOTICE_MS = 3_000L
         const val FILE_CHOOSER_REQUEST = 1
         const val SAVE_FILE_REQUEST = 2
