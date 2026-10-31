@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" alt="OpenCodie: an Android device with a coding terminal" width="192">
+<img src="logo.svg" alt="OpenCodie OC monogram with violet terminal prompt" width="192">
 
 <h1>OpenCodie</h1>
 
@@ -14,7 +14,7 @@
 
 <p><strong>📱 Run OpenCode on Android with a bundled Termux environment and an integrated coding interface—without installing Termux separately. ⚡</strong></p>
 
-<img src="assets/opencodie-flow.svg" alt="Workflow: install the APK, automatically set up OpenCode and Termux, and code through the Android app" width="900">
+<img src="assets/opencodie-hero.svg" alt="OpenCodie pocket workstation: Android phone running the OpenCode interface, with a terminal and project files" width="900">
 
 <p><a href="https://github.com/anthracite-labs/OpenCodie/releases"><strong>Download OpenCodie.apk</strong></a> · <a href="#-quick-start">Quick start</a> · <a href="#-build-from-source">Build from source</a> · <a href="https://github.com/anthracite-labs/OpenCodie/issues">Report an issue</a></p>
 
@@ -47,6 +47,8 @@
 
 ## 🚀 Quick start
 
+![First launch: download, bootstrap, connect an AI provider, and start coding](assets/first-launch.svg)
+
 **Requirements:** Android **10+** (API 29+) on an **ARM64 / aarch64** device; enough space for the approximately 153 MiB download and the extracted runtime; and access to an AI model/provider supported by OpenCode. Provider credentials and internet access may be required.
 
 1. Visit [GitHub Releases](https://github.com/anthracite-labs/OpenCodie/releases), select the newest suitable build, and download **`OpenCodie.apk`**. Builds may be labeled *pre-release*.
@@ -65,6 +67,8 @@ OpenCodie includes the runtime, **not a free or offline AI model**. Model connec
 
 ## ✨ What is included
 
+![OpenCodie capabilities: AI coding, shell tools, Git, project files, local server, and Android integration](assets/capabilities.svg)
+
 | Capability | Benefit |
 | --- | --- |
 | **OpenCode v2.2.2** | Pinned OpenCode server and mobile-adjusted Web UI |
@@ -80,16 +84,7 @@ OpenCodie provides OpenCode's **Web UI**, not a standalone Termux terminal scree
 
 ## 🧩 How it works
 
-```mermaid
-flowchart TD
-    A[OpenCodie Android app] --> B[RuntimeInstaller]
-    B --> C[Bundled Termux userspace]
-    C --> D[OpenCode server]
-    A --> E[Embedded WebView]
-    E <-->|Authenticated loopback session| D
-    D --> F[Projects in ~/projects/workspace]
-    G[Foreground OpenCodeService] -->|Supervises| D
-```
+![OpenCodie architecture: Android app, runtime installer, Termux userspace, local OpenCode server, embedded WebView, project files, and optional external AI providers](assets/architecture.svg)
 
 On first launch, `RuntimeInstaller` verifies and extracts the embedded archive, runs Termux's package setup, and writes initial OpenCode configuration. `OpenCodeHost` launches `opencode serve --hostname 127.0.0.1 --port 4096` and pairs the WebView with the server. The foreground service supervises this process.
 
