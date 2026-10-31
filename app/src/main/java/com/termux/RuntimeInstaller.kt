@@ -272,30 +272,48 @@ object RuntimeInstaller {
      * manual extraction skips. It is guarded by its own lock symlink and is a
      * one-time operation for the lifetime of the prefix, so a retry after a
      * completed run is a no-op.
+     *
+     * Timeout-correctness lives in [SecondStageRunner]: stdout is drained on a
+     * daemon thread while the deadline is enforced by a monotonic clock on the
+     * calling thread, so a blocked reader can never suppress the timeout.
+     * Marker semantics are unchanged: no ready-file write happens here, and
+     * this patch adds no retries.
      */
     private fun runSecondStage(prefix: File, log: (String) -> Unit) {
         val script = File(prefix, "etc").walkTopDown()
             .firstOrNull { it.isFile && it.name == "termux-bootstrap-second-stage.sh" }
             ?: error("Bundled Termux bootstrap second-stage script is missing")
         log("Configuring Termux packages")
-        val process = ProcessBuilder("${prefix.path}/bin/bash", script.path)
-            .directory(File(Termux.HOME))
-            .redirectErrorStream(true)
-            .apply {
-                environment().apply {
-                    clear()
-                    putAll(Termux.environment(Process.myUid()))
+        val runner = SecondStageRunner(RealProcessLauncher(), AndroidMonotonicClock())
+        when (
+            val result = runner.run(
+                command = listOf("${prefix.path}/bin/bash", script.path),
+                workdir = File(Termux.HOME),
+                env = Termux.environment(Process.myUid()),
+                log = log,
+            )
+        ) {
+            is SecondStageResult.Success -> Unit
+            is SecondStageResult.Failed ->
+                check(false) { "Termux bootstrap second stage failed (exit ${result.exitCode})\n${result.tail}" }
+            is SecondStageResult.TimedOut -> {
+                val stuck = if (!result.terminated) {
+                    " WARNING: bootstrap process survived termination and may still hold resources."
+                } else {
+                    ""
+                }
+                val leaked = if (!result.readerSettled) {
+                    " WARNING: output reader did not settle; its daemon thread was abandoned."
+                } else {
+                    ""
+                }
+                check(false) {
+                    "Termux bootstrap second stage timed out after $SECOND_STAGE_TIMEOUT_MS ms.$stuck$leaked\n${result.tail}"
                 }
             }
-            .start()
-        val tail = StringBuilder()
-        process.inputStream.bufferedReader().forEachLine { line ->
-            log(line)
-            tail.append(line).append('\n')
-            if (tail.length > 2_000) tail.delete(0, tail.length - 2_000)
+            is SecondStageResult.Interrupted ->
+                throw IllegalStateException("Termux bootstrap second stage interrupted\n${result.tail}")
         }
-        val code = process.waitFor()
-        check(code == 0) { "Termux bootstrap second stage failed (exit $code)\n$tail" }
     }
 
     /** Initial OpenCode configuration; later user edits are preserved. */
