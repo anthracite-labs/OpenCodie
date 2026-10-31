@@ -127,6 +127,13 @@
       "skillPath": "skills/planning-and-task-breakdown/SKILL.md",
       "computedHash": "0dc14a1402cdabd376f2d81d2225fcb4a18ee63d58b945ff83affeb024285b8f"
     },
+    "project-readme-author": {
+      "source": "tsilva/claudeskillz",
+      "sourceType": "github",
+      "ref": "659926f23483467e279c5f0e306471b8320f722d",
+      "skillPath": "plugins/project-readme-author/skills/project-readme-author/SKILL.md",
+      "computedHash": "027c2a570d7e950bbbd69ae72886b29a68c29b58cbe5db903df69ff2318e722e"
+    },
     "security-and-hardening": {
       "source": "addyosmani/agent-skills",
       "sourceType": "github",
