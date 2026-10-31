@@ -38,6 +38,7 @@ texts through `termux-licenses`); do not remove these from release archives.
 | [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) | Imported skills in `.agents/skills/`, as recorded in `skills-lock.json` | [MIT](https://github.com/addyosmani/agent-skills/blob/main/LICENSE) |
 | [oil-oil/beautify-github-readme](https://github.com/oil-oil/beautify-github-readme) | `.agents/skills/beautify-github-readme/` | [MIT](https://github.com/oil-oil/beautify-github-readme/blob/main/LICENSE) |
 | [s1dashu/ip-as-logo-skill](https://github.com/s1dashu/ip-as-logo-skill) | `.agents/skills/ip-as-logo/`; its own `LICENSE` is also retained there | [MIT](https://github.com/s1dashu/ip-as-logo-skill/blob/main/LICENSE) |
+| [tsilva/claudeskillz](https://github.com/tsilva/claudeskillz) (`project-readme-author` v2.6.1) | `.agents/skills/project-readme-author/` (GitHub source previously named `tsilva/claude-skills`; pinned in `skills-lock.json`) | [MIT](https://github.com/tsilva/claudeskillz/blob/main/LICENSE) |
 
 Build/test-time-only tools, not intentionally bundled in the release APK,
 include Gradle/Android Gradle Plugin (Apache-2.0) and JUnit 4.13.2 (EPL-1.0).
@@ -58,6 +59,7 @@ remains with its respective author(s).
 - addyosmani/agent-skills: Copyright (c) 2025 Addy Osmani
 - oil-oil/beautify-github-readme: Copyright (c) 2026 oil-oil
 - s1dashu/ip-as-logo-skill: Copyright (c) 2026 s1dashu
+- tsilva/claudeskillz (project-readme-author): Copyright (c) 2025 tsilva
 
 Bun and the Termux-packaged ripgrep also identify MIT terms; consult their
 linked upstream notices and the bundled Termux package copyright files for the
