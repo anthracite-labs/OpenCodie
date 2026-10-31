@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Preserve the approved neon glow and violet Matrix rain as a single flat artwork layer. -->
+    <background android:drawable="@drawable/opencodie_launcher_art" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
