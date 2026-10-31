@@ -154,6 +154,38 @@ object OpenCodeHost {
         throw IllegalStateException("OpenCode did not become ready:\n${log()}")
     }
 
+    /**
+     * A pairing link is single-use. New Activity instances must request a
+     * freshly minted code instead of replaying the supervisor's startup link.
+     * Call only from a background thread once pairingUrl is non-null.
+     */
+    fun freshPairingUrl(): String {
+        check(pairingUrl != null && process?.isAlive == true) { "OpenCode server is not ready" }
+        return pairingURL()
+    }
+
+    /**
+     * Check whether the WebView's persisted cookies still authenticate on
+     * this exact loopback origin. Do not send Basic credentials: validating
+     * the browser session is different from validating the app's password.
+     */
+    fun hasValidWebSession(cookies: String): Boolean {
+        if (cookies.isBlank()) return false
+        val request = (URL("http://$HOST:$PORT/api/info").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 3_000
+            readTimeout = 5_000
+            setRequestProperty("Cookie", cookies)
+        }
+        return try {
+            request.responseCode == 200
+        } catch (_: Exception) {
+            false
+        } finally {
+            request.disconnect()
+        }
+    }
+
     private fun pairingURL(): String {
         val request = connection("POST", "/api/pair")
         val body = try {
