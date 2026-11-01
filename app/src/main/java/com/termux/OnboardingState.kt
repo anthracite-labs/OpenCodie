@@ -8,8 +8,6 @@ import java.net.URI
  * Installation, authentication and supervision remain owned by the existing
  * RuntimeInstaller/OpenCodeHost. Never derive progress percentages from text.
  */
-internal enum class SetupPhase { PREPARING, CONNECTING, FAILED }
-
 internal object OnboardingState {
     fun canRevealWebView(
         onboardingCompleted: Boolean,
@@ -37,5 +35,4 @@ internal object OnboardingState {
 
     fun shouldPromptForStorage(runtimeReady: Boolean, optedIn: Boolean, alreadyPrompted: Boolean): Boolean =
         runtimeReady && optedIn && !alreadyPrompted
-
 }
