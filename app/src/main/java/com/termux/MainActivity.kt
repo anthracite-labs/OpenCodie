@@ -433,6 +433,7 @@ class MainActivity : Activity() {
         handler.postDelayed({
             if (isDestroyed || isFinishing) return@postDelayed
             maybeRequestBootstrapStorage()
+            maybeShowFirstRun()
             val error = OpenCodeHost.error
             val serverPairingLink = OpenCodeHost.pairingUrl
             when {
@@ -461,6 +462,43 @@ class MainActivity : Activity() {
             refreshHealthPanel()
             poll()
         }, if (loadedUrl == null) POLL_MS else RECONNECT_POLL_MS)
+    }
+
+    /** First run: one welcome dialog per version, after the auto storage prompt. */
+    private fun maybeShowFirstRun() {
+        if (!resumed || isDestroyed || isFinishing) return
+        if (!File(filesDir, ".opencodie-ready").isFile) return
+        val bootstrap = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+        if (!bootstrap.getBoolean("storage_prompted", false)) return
+        val prefs = getSharedPreferences(FirstRun.PREFS, MODE_PRIVATE)
+        val version = BuildConfig.VERSION_NAME
+        if (!FirstRun.shouldShow(
+                runtimeReady = true,
+                storagePromptedBefore = true,
+                seenVersion = prefs.getString(FirstRun.SEEN_KEY, null),
+                currentVersion = version,
+            )
+        ) return
+        val markSeen = { prefs.edit().putString(FirstRun.SEEN_KEY, version).apply() }
+        val projectsDir = File(Termux.HOME, "projects")
+        val names = projectsDir.list()?.toList() ?: emptyList()
+        val lines = FirstRun.stepLines(
+            FirstRunState(
+                runtimeReady = true,
+                storageGranted = hasStoragePermission(),
+                projectNames = names,
+                seenVersion = null,
+                currentVersion = version,
+            ),
+        )
+        markSeen()
+        AlertDialog.Builder(this)
+            .setTitle("Welcome to OpenCodie")
+            .setMessage(lines.joinToString("\n") + "\n\nProvider sign-in and coding happen in the WebUI.")
+            .setPositiveButton("Continue", null)
+            .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
+            .setOnDismissListener { markSeen() }
+            .show()
     }
 
     /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */
