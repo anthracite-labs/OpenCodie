@@ -491,10 +491,10 @@ class MainActivity : Activity() {
                 }
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
                     .putBoolean("storage_links_ready", true).apply()
-                show("Termux storage ready: ~/storage")
+                show("Shared files connected")
             } catch (e: Exception) {
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
-                show("Storage setup failed: ${e.message}")
+                show("Could not connect shared files; see diagnostics if needed")
             }
         }.apply { isDaemon = true }.start()
     }
