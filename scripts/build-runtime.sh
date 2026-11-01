@@ -26,7 +26,11 @@ test -x "$DIST/opencode/opencode" && test -x "$DIST/opencode/opencode.bin" || {
 }
 
 echo "==> termux bootstrap $TERMUX_BOOTSTRAP_TAG @ $TERMUX_BOOTSTRAP_COMMIT"
-if [ ! -f "$BOOTSTRAP" ] || [ "$(cat "$BOOTSTRAP_KEY" 2>/dev/null || true)" != "$EXPECTED_INPUTS" ]; then
+cached_inputs=""
+if [ -f "$BOOTSTRAP_KEY" ]; then
+    cached_inputs="$(cat "$BOOTSTRAP_KEY")"
+fi
+if [ ! -f "$BOOTSTRAP" ] || [ "$cached_inputs" != "$EXPECTED_INPUTS" ]; then
     TERMUX="$WORK/termux-packages"
     if [ ! -d "$TERMUX/.git" ]; then
         mkdir -p "$WORK"
@@ -64,10 +68,10 @@ install -m 644 "$REPO_ROOT/THIRD_PARTY_NOTICES.md" "$STAGE/share/doc/opencodie/T
 
 echo "==> archive"
 rm -f "$ARCHIVE"
-(cd "$STAGE" && zip -r -9 -q "$ARCHIVE" ./*)
+(cd "$STAGE" && zip -r -9 -q "$ARCHIVE" .)
 
 for expected in bin/pkg bin/apt bin/dpkg bin/bash bin/rg lib/libc++_shared.so etc/opencode-apk/version libexec/opencode/opencode.bin; do
-    unzip -l "$ARCHIVE" | grep -q " $expected\$" || {
+    zipinfo -1 "$ARCHIVE" | grep -qx "$expected" || {
         echo "runtime is missing $expected" >&2
         exit 1
     }

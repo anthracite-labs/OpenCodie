@@ -34,12 +34,7 @@ fi
 checkout_pinned "$UPSTREAM" "$OPENCODE_COMMIT"
 
 apply_patch() {
-    if git -C "$UPSTREAM" apply --reverse --check "$REPO_ROOT/patches/$1" 2>/dev/null; then
-        echo "$1 already applied"
-    else
-        git -C "$UPSTREAM" apply "$REPO_ROOT/patches/$1"
-        echo "applied $1"
-    fi
+    apply_patch_if_needed "$UPSTREAM" "$REPO_ROOT/patches/$1"
 }
 apply_patch opencode-android.patch
 apply_patch watcher-android.patch
@@ -57,13 +52,16 @@ bun install --frozen-lockfile --os="*" --cpu="*" --libc="*"
 # Bun skips some os:android optionals even with --os="*"; fetch them verbatim.
 ensure_npm_package() {
     local name="$1" version="$2" expected_sha="$3" flat="node_modules/$1"
-    if [ -d "$flat" ] || ls -d "node_modules/.bun/$(echo "$name" | sed 's@/@+@')@$version" >/dev/null 2>&1; then
+    local bun_dir="node_modules/.bun/$(echo "$name" | sed 's@/@+@')@$version"
+    if [ -d "$flat" ] || [ -d "$bun_dir" ]; then
         return 0
     fi
     test -n "$expected_sha" || { echo "missing sha256 for $name@$version" >&2; exit 1; }
     echo "fetching $name@$version from npm"
     mkdir -p "$flat"
+    local tmp
     tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' RETURN
     curl -fsSL "https://registry.npmjs.org/$name/-/$(basename "$name")-$version.tgz" -o "$tmp"
     actual="$(sha256sum "$tmp" | cut -d' ' -f1)"
     test "$actual" = "$expected_sha" || {
@@ -71,8 +69,9 @@ ensure_npm_package() {
         rm -f "$tmp"
         exit 1
     }
-    tar xz -C "$flat" --strip-components=1 -f "$tmp"
+    tar xz --no-same-owner -C "$flat" --strip-components=1 -f "$tmp"
     rm -f "$tmp"
+    trap - RETURN
 }
 ensure_npm_package "@parcel/watcher-android-arm64" "$PARCEL_WATCHER_VERSION" "$PARCEL_WATCHER_SHA256"
 ensure_npm_package "@opencode/pty-linux-arm64-musl" "$PTY_VERSION" "$PTY_MUSL_SHA256"
@@ -81,7 +80,11 @@ echo "==> native PTY binding"
 bash "$REPO_ROOT/scripts/build-natives.sh" "$UPSTREAM"
 
 echo "==> compile (WebUI embedded)"
-export BUN_COMPILE_RELEASE OPENCODE_CHANNEL=latest
+# BUN_COMPILE_RELEASE comes from runtime.lock (bun-v1.4.4); exporting it
+# (even just set, no extra value) switches Bun into release-compile mode.
+# OPENCODE_CHANNEL controls the update channel embedded in the binary.
+export BUN_COMPILE_RELEASE="${BUN_COMPILE_RELEASE:?BUN_COMPILE_RELEASE missing from runtime.lock}"
+export OPENCODE_CHANNEL=latest
 export OPENCODE_VERSION="${OPENCODE_VERSION#v}"
 export GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 cd "$UPSTREAM/packages/cli"

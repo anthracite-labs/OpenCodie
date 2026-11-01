@@ -14,18 +14,32 @@ jobs:
     name: Republish known-good APK as rollback release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    concurrency:
+      group: rollback
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pinned Android SDK
+        uses: ./.github/actions/setup-android-sdk
+        with:
+          packages: 'platforms;android-37.0 build-tools;37.0.0'
       - name: Fetch known-good APK
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_TAG: ${{ inputs.source_tag }}
         run: |
           set -euo pipefail
+          case "$SOURCE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*|v[0-9]*.[0-9]*.[0-9]*-build.*|rollback-*) ;;
+            *) echo "::error::SOURCE_TAG must be a release tag (vX.Y.Z) or rollback-*" >&2; exit 1 ;;
+          esac
           mkdir -p rollback-apk
-          gh release download "$SOURCE_TAG" \
+          gh release download -- "$SOURCE_TAG" \
             --pattern 'OpenCodie.apk' --dir rollback-apk
           APK=rollback-apk/OpenCodie.apk
           test -s "$APK"
@@ -33,6 +47,18 @@ jobs:
           echo "Rollback APK size: $bytes bytes"
           ls -lh "$APK"
           sha256sum "$APK"
+          # Budget mirrors build-and-release (210 MiB); reject runaway files.
+          test "$bytes" -gt 0
+          test "$bytes" -le 220200960 || { echo "::error::rollback APK exceeds size budget" >&2; exit 1; }
+          : "${ANDROID_HOME:?ANDROID_HOME must be set by runner}"
+          BT="$ANDROID_HOME/build-tools/37.0.0"
+          "$BT/apksigner" verify "$APK"
+          "$BT/apksigner" verify --print-certs "$APK" | grep -q "DN: CN=opencodie" || true
+          # Fingerprint must match the committed release public cert.
+          "$BT/apksigner" verify --print-certs "$APK" > "$RUNNER_TEMP/certs.txt"
+          openssl x509 -in .github/signing/release-public.pem -noout -fingerprint -sha256 > "$RUNNER_TEMP/expected.txt"
+          grep -F -f <(cut -d: -f2- "$RUNNER_TEMP/expected.txt" | tr -d ' \n') "$RUNNER_TEMP/certs.txt" \
+            || { echo "::error::rollback APK cert does not match release-public.pem" >&2; exit 1; }
       - name: Publish rollback release
         env:
           GH_TOKEN: ${{ github.token }}

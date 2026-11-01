@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  BUN_VERSION: '1.4.4'
+  NDK_VERSION: r28b
+  ANDROID_PLATFORM: android-37.0
+  BUILD_TOOLS: 37.0.0
+
 concurrency:
   group: build-release-${{ github.ref }}
   cancel-in-progress: true
@@ -70,11 +76,15 @@ jobs:
           sudo apt-get install -y zip unzip xz-utils binutils curl
           rustup target add aarch64-linux-android
           if [ ! -x "$HOME/.bun/bin/bun" ]; then
-            curl -fsSL https://bun.sh/install | bash -s bun-v1.4.4
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${{ env.BUN_VERSION }}"
           fi
-          test "$("$HOME/.bun/bin/bun" --version)" = 1.4.4
-          if [ ! -d /opt/android-ndk-r28b ]; then
-            curl -fsSL https://dl.google.com/android/repository/android-ndk-r28b-linux.zip -o "$RUNNER_TEMP/ndk.zip"
+          test "$("$HOME/.bun/bin/bun" --version)" = "${{ env.BUN_VERSION }}"
+          if [ ! -d "/opt/android-ndk-${{ env.NDK_VERSION }}" ]; then
+            curl -fsSL "https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip" -o "$RUNNER_TEMP/ndk.zip"
+            test -s "$RUNNER_TEMP/ndk.zip"
+            if [ -n "${ANDROID_NDK_SHA256:-}" ]; then
+              printf '%s  %s\n' "$ANDROID_NDK_SHA256" "$RUNNER_TEMP/ndk.zip" | sha256sum -c -
+            fi
             sudo unzip -q "$RUNNER_TEMP/ndk.zip" -d /opt
           fi
       - name: Build native runtime
@@ -153,7 +163,6 @@ jobs:
     name: Dependency review
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    if: github.event_name == 'pull_request'
     permissions:
       contents: read
     steps:
@@ -166,7 +175,7 @@ jobs:
   apk:
     name: Assemble, verify and optionally release APK
     runs-on: ubuntu-24.04
-    needs: [runtime, unit-tests, lint]
+    needs: [runtime, unit-tests, lint, dependency-review]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -177,11 +186,12 @@ jobs:
       - name: Install pinned Android SDK
         uses: ./.github/actions/setup-android-sdk
         with:
-          packages: 'platforms;android-37.0 build-tools;37.0.0'
+          packages: 'platforms;${{ env.ANDROID_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }}'
       - name: Check apksigner
         run: |
           set -euo pipefail
-          test -x "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          : "${ANDROID_HOME:?ANDROID_HOME must be set by runner}"
+          test -x "$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS }}/apksigner"
       - uses: actions/download-artifact@v4
         with:
           name: prepared-runtime
@@ -193,6 +203,8 @@ jobs:
           ENCRYPTION_PRIVATE_KEY: ${{ secrets.OPENCODIE_SIGNING_DECRYPT_KEY }}
         run: |
           set -euo pipefail
+          cleanup() { rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"; }
+          trap cleanup EXIT
           if [ -z "$ENCRYPTION_PRIVATE_KEY" ]; then
             echo "::error::Set OPENCODIE_SIGNING_DECRYPT_KEY in repository Actions secrets to sign the APK"
             exit 1
@@ -227,33 +239,30 @@ jobs:
             echo "OPENCODIE_KEY_PASSWORD=$pass"
           } >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/decrypt.pem" "$RUNNER_TEMP/signing-pass.txt"
-      - name: Assemble APK
+          trap - EXIT
+      - name: Assemble APK and resolve path
         env:
           OPENCODIE_VERSION_CODE: ${{ github.run_number }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             ./gradlew --no-daemon :app:assembleDebug
-          else
-            ./gradlew --no-daemon :app:assembleRelease
-          fi
-      - name: Resolve APK path
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             echo "APK=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
           else
+            ./gradlew --no-daemon :app:assembleRelease
             echo "APK=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
           fi
       - name: Pre-launch checklist — package, SDK and runtime
         run: |
           set -euo pipefail
+          : "${APK:?APK not set}"
+          : "${ANDROID_HOME:?ANDROID_HOME must be set by runner}"
           test -s "$APK"
-          BT="$ANDROID_HOME/build-tools/37.0.0"
+          BT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS }}"
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
           grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
-          grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
+          grep -Fxq "targetSdkVersion:'29'" "$RUNNER_TEMP/badging.txt"
           source ./runtime.lock
           grep -Fq "versionName='${OPENCODE_VERSION#v}'" "$RUNNER_TEMP/badging.txt"
           unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
@@ -277,7 +286,7 @@ jobs:
       - name: Enforce APK size budget
         run: |
           set -euo pipefail
-          # Current release is ~161 MB; budget 210 MB catches runaway runtime growth.
+          # Current release is ~161 MB; budget 210 MiB catches runaway runtime growth.
           max_bytes=220200960
           bytes="$(stat -c%s "$APK")"
           echo "APK size: $bytes bytes (budget $max_bytes bytes)"

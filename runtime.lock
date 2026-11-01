@@ -4,6 +4,8 @@
 # Upstream OpenCode v2 (WebUI + server + CLI), built with Bun 1.4.4.
 OPENCODE_VERSION=v2.2.2
 OPENCODE_COMMIT=098aa7fd6e02b03d6fc410f0b052038c7d4c5e81
+# Fork used for Android port; upstream is sst/opencode. Sync policy: rebase
+# onto upstream tags, keep android/mobile-ui/watcher patches in patches/.
 OPENCODE_REPO=https://github.com/anomalyco/opencode.git
 
 # Bun is fixed by the specification: 1.4.4 ships bun-linux-aarch64-android.zip.
@@ -25,9 +27,10 @@ TERMUX_BOOTSTRAP_COMMIT=4fd34c88f930defaed700fc5123536f5d9dce266
 TERMUX_PACKAGES_REPO=https://github.com/termux/termux-packages.git
 TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git
 
-# Android toolchain.
+# Android toolchain. TARGET must stay >= MIN (AGP requirement); 29 keeps
+# requestLegacyExternalStorage working for the storage bridge.
 ANDROID_COMPILE_SDK=37
-ANDROID_TARGET_SDK=28
+ANDROID_TARGET_SDK=29
 ANDROID_MIN_SDK=29
 ANDROID_NDK_VERSION=r28b
 ANDROID_API=29

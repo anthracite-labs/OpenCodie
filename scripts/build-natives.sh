@@ -13,6 +13,8 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../runtime.lock disable=SC1091
 source "$REPO_ROOT/runtime.lock"
+# shellcheck source=lib.sh disable=SC1091
+source "$REPO_ROOT/scripts/lib.sh"
 
 UPSTREAM="${1:?usage: build-natives.sh <opencode checkout>}"
 WORK="${WORK:-$REPO_ROOT/work}"
@@ -33,6 +35,10 @@ export CFLAGS_aarch64_linux_android="--sysroot=$TOOLCHAIN/sysroot"
 
 echo "==> bun-pty v$BUN_PTY_VERSION sources"
 if [ ! -d "$SRC/.git" ]; then
+    if [ -e "$SRC" ]; then
+        echo "stale $SRC without .git (interrupted clone?) — remove it and re-run" >&2
+        exit 1
+    fi
     mkdir -p "$WORK"
     git clone --depth 1 --branch "v$BUN_PTY_VERSION" https://github.com/sursaone/bun-pty.git "$SRC"
 fi
@@ -41,30 +47,26 @@ test "$(git -C "$SRC" rev-parse HEAD)" = "$BUN_PTY_COMMIT" || {
     exit 1
 }
 # A required patch must either apply or already be applied.
-if git -C "$SRC" apply --reverse --check "$REPO_ROOT/patches/bun-pty-portable09.patch" 2>/dev/null; then
-    echo "bun-pty patch already applied"
-else
-    git -C "$SRC" apply --check "$REPO_ROOT/patches/bun-pty-portable09.patch"
-    git -C "$SRC" apply "$REPO_ROOT/patches/bun-pty-portable09.patch"
-fi
+apply_patch_if_needed "$SRC" "$REPO_ROOT/patches/bun-pty-portable09.patch"
 
 echo "==> cargo build $TARGET"
 (
     cd "$SRC/rust-pty"
     rustup target add "$TARGET"
-    cargo build --release --target "$TARGET"
+    cargo build --locked --release --target "$TARGET"
 )
 BUILT="$SRC/rust-pty/target/$TARGET/release/librust_pty.so"
-test -f "$BUILT"
+test -f "$BUILT" || { echo "missing built library: $BUILT" >&2; exit 1; }
 bash "$REPO_ROOT/scripts/check-elf.sh" --no-glibc --no-musl --no-errno-location --arch aarch64 "$BUILT"
 
 echo "==> install into bun-pty embed slots"
-SLOTS=$(find "$UPSTREAM/node_modules" -type d -path "*/bun-pty/rust-pty/target/release" 2>/dev/null || true)
-test -n "$SLOTS" || {
+found=0
+while IFS= read -r -d '' slot; do
+    install -m 755 "$BUILT" "$slot/librust_pty_arm64.so"
+    echo "installed $slot/librust_pty_arm64.so"
+    found=1
+done < <(find "$UPSTREAM/node_modules" -type d -path "*/bun-pty/rust-pty/target/release" -print0 2>/dev/null || true)
+test "$found" = 1 || {
     echo "no bun-pty install found under $UPSTREAM/node_modules" >&2
     exit 1
 }
-for slot in $SLOTS; do
-    install -m 755 "$BUILT" "$slot/librust_pty_arm64.so"
-    echo "installed $slot/librust_pty_arm64.so"
-done

@@ -8,47 +8,68 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def read(rel):
+    return (ROOT / rel).read_text()
+
+
+def section_after(text, marker):
+    assert marker in text, f"marker {marker!r} not found"
+    return text.split(marker, 1)[1]
+
+
 class BuildContractTest(unittest.TestCase):
+    def assertContainsAll(self, text, items):
+        for s in items:
+            self.assertIn(s, text)
+
     def test_version_tracks_opencode_runtime_lock(self):
-        gradle = (ROOT / "app/build.gradle.kts").read_text()
+        gradle = read("app/build.gradle.kts")
         self.assertIn('startsWith("OPENCODE_VERSION=")', gradle)
         self.assertIn("versionName = openCodeVersion", gradle)
 
     def test_single_signed_release_artifact(self):
-        workflow = (ROOT / ".github/workflows/build-and-release.yml").read_text()
-        self.assertIn("dist/OpenCodie.apk", workflow)
-        self.assertIn("name: OpenCodie", workflow)
-        self.assertIn("if: github.event_name != 'pull_request'", workflow)
+        workflow = read(".github/workflows/build-and-release.yml")
+        self.assertContainsAll(workflow, [
+            "dist/OpenCodie.apk",
+            "name: OpenCodie",
+            "if: github.event_name != 'pull_request'",
+            '"$BT/apksigner" verify "$APK"',
+            'gh release create "$tag"',
+            '"$APK#OpenCodie.apk"',
+            "github.ref == 'refs/heads/main'",
+        ])
         self.assertNotIn("path: app/build/outputs/apk/**/*.apk", workflow)
-        self.assertIn('"$BT/apksigner" verify "$APK"', workflow)
-        self.assertIn('gh release create "$tag"', workflow)
-        self.assertIn('"$APK#OpenCodie.apk"', workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
 
     def test_mobile_shell_output_build_contract(self):
-        build = (ROOT / "scripts/build-opencode.sh").read_text()
-        patch = (ROOT / "patches/opencode-mobile-ui.patch").read_text()
-        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
+        build = read("scripts/build-opencode.sh")
+        patch = read("patches/opencode-mobile-ui.patch")
+        activity = read("app/src/main/java/com/termux/MainActivity.kt")
         self.assertIn("apply_patch opencode-mobile-ui.patch", build)
-        self.assertIn("function ConsoleOutput", patch)
-        self.assertIn("Wrap: On", patch)
-        self.assertIn("data-expanded", patch)
-        self.assertIn("max-height: 75dvh", patch)
-        self.assertIn('white-space: pre;', patch)
+        self.assertContainsAll(patch, [
+            "function ConsoleOutput",
+            "Wrap: On",
+            "data-expanded",
+            "max-height: 75dvh",
+            'white-space: pre;',
+        ])
         self.assertIn("settings.textZoom =", activity)
 
     def test_storage_permission_is_requested_automatically_after_bootstrap(self):
-        activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
-        installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
+        activity = read("app/src/main/java/com/termux/MainActivity.kt")
+        installer = read("app/src/main/java/com/termux/RuntimeInstaller.kt")
 
         # Initial bootstrap's ready marker is written only after second-stage setup.
-        self.assertIn('private const val READY_FILE = ".opencodie-ready"', installer)
-        self.assertIn('File(filesDir, ".opencodie-ready").isFile', activity)
-        self.assertIn('getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)', activity)
-        self.assertIn('putBoolean("storage_prompted", true).commit()', activity)
-        self.assertIn('if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return', activity)
-        self.assertIn('maybeRequestBootstrapStorage()', activity.split("private fun poll()", 1)[1])
-        self.assertIn('requestStorageAccess()', activity.split("private fun maybeRequestBootstrapStorage()", 1)[1])
+        self.assertContainsAll(installer, [
+            'private const val READY_FILE = ".opencodie-ready"',
+        ])
+        self.assertContainsAll(activity, [
+            'File(filesDir, ".opencodie-ready").isFile',
+            'getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)',
+            'putBoolean("storage_prompted", true).commit()',
+            'if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return',
+        ])
+        self.assertIn('maybeRequestBootstrapStorage()', section_after(activity, "private fun poll()"))
+        self.assertIn('requestStorageAccess()', section_after(activity, "private fun maybeRequestBootstrapStorage()"))
 
     def test_termux_setup_storage_bridge(self):
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()

@@ -15,9 +15,12 @@ export PREFIX
 # Termux libc++ package; Bun's own runtime has no RUNPATH into $PREFIX/lib.
 export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # /tmp is not writable for an Android app; keep PTY sockets in the prefix.
+# Assumes $PREFIX/tmp exists (created during bootstrap); the launcher does not
+# mkdir here so a broken prefix fails loudly instead of hiding behind an empty dir.
 export OPENCODE_PTY_SOCKET_DIR="${OPENCODE_PTY_SOCKET_DIR:-$PREFIX/tmp}"
 # OpenCodie ships no bionic build of the native file finder, so use OpenCode's
 # ripgrep backend instead of a native binary that cannot load.
+# Launcher-only (host never sets it), so unconditional export is intentional.
 export OPENCODE_DISABLE_FFF=1
 for candidate in "$dir/../libexec/opencode/opencode.bin" "$PREFIX/libexec/opencode/opencode.bin" "$dir/opencode.bin"; do
     if [ -x "$candidate" ]; then
