@@ -57,6 +57,26 @@ object OpenCodeHost {
         process = null
     }
 
+    /**
+     * Settings action: restart the server without changing the workspace.
+     * Call off the UI thread; briefly waits for the old supervisor's exit.
+     */
+    @Synchronized
+    fun restart(context: Context) {
+        val old = supervisor
+        stop()
+        var waits = 0
+        while (old?.isAlive == true && waits < 30) {
+            try {
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+                break
+            }
+            waits++
+        }
+        start(context)
+    }
+
     private fun supervise(context: Context) {
         try {
             RuntimeInstaller.installIfNeeded(context) { status = it }
