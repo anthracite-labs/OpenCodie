@@ -4,9 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class OnboardingStateTest {
-
-
-
     @Test fun onboardingMustBeCompletedAndWebUiLoadedBeforeReveal() {
         assertEquals(false, OnboardingState.canRevealWebView(false, false))
         assertEquals(false, OnboardingState.canRevealWebView(true, false))
@@ -20,7 +17,6 @@ class OnboardingStateTest {
         assertEquals(false, OnboardingState.shouldPromptForStorage(true, true, true))
         assertEquals(true, OnboardingState.shouldPromptForStorage(true, true, false))
     }
-
 
     @Test fun stalePageIsNeverShownWhenHostRestartsOrFails() {
         assertEquals(false, OnboardingState.canRevealWebView(true, true, false, false))
@@ -43,6 +39,4 @@ class OnboardingStateTest {
         assertEquals(false, OnboardingState.isWorkspaceUrl("http://example.com:4096/", "127.0.0.1", 4096))
         assertEquals(false, OnboardingState.isWorkspaceUrl("https://127.0.0.1:4096/", "127.0.0.1", 4096))
     }
-
-
 }
