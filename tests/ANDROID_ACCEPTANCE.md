@@ -1,6 +1,6 @@
 # Android acceptance: permission decisions and live startup
 
-PR #46 adds unit tests, a connected Android instrumentation suite, and a typed startup timeline. CI compiles the Android instrumentation APK; **it cannot approve this PR for merge without device checks**.
+PR #46 adds unit tests, a connected Android instrumentation suite, and a typed startup timeline. CI compiles the Android instrumentation APK and the separate `android-ui-tests.yml` workflow attempts the connected suite on an Android 15 emulator. **A real ARM64 device remains necessary for release acceptance and fidelity validation.**
 
 ## Environment
 
@@ -20,7 +20,7 @@ Build and run the Android suite from a checkout with the Android SDK and test de
   -Pandroid.testInstrumentationRunnerArguments.class=com.termux.OnboardingAndroidTest#notificationPendingIsNeutralBeforeUserAnswers
 ```
 
-The GitHub CI job uses `assembleDebugAndroidTest` for compilation only. An emulator or physical Android device is needed to execute the tests.
+The main build workflow compiles the connected suite. The `Android UI regression (emulator)` workflow additionally attempts `connectedDebugAndroidTest` on API 35 (x86_64 + ARM64 translation) and uploads a welcome screenshot and test reports. Emulator compatibility must be verified from each PR run; it does not replace real ARM64 testing.
 
 For each pull request, the build workflow now uploads a **debug-signed** APK artifact named `OpenCodie-PR<PR_NUMBER>-debug` (7-day retention) after APK validation. Download the ZIP from the successful GitHub Actions run. **Debug signing is not production signing**. If your device already has production OpenCodie installed with package `com.termux`, Android may reject installing the test build over it; **do not uninstall or erase the production app without backing up your workspace**. Use a dedicated test device or prepared backup.
 
@@ -52,6 +52,13 @@ For targetSdk 28, the first notification request is Android-controlled. The app 
 | L8 | Force a recoverable server failure then observe automatic retry | Shows **Retrying the local OpenCode server…** with last cause and diagnostics, never flashes a terminal error screen; clears retry status only after verified readiness |
 | A1 | Font scale 1.3/2.0 and TalkBack | Control text wraps; status announced politely; stage updates do not repeatedly steal focus |
 | A2 | Long setup logs, injected credentials in diagnostics | UI shows only controlled stage names; user secrets never appear in status or copied diagnostics |
+| A3 | 320dp split-screen, landscape and 2.0x font | Permission controls stay inside cards; main column remains readable and scrollable |
+| A4 | Renderer termination (memory reclaim and repeated crash) | Activity stays alive; valid session recovers with bounded retries; repeated crash offers Try again |
+| A5 | HTTP 404/429/503, expired cookies and temporary probe timeout | Missing project routes stay in the Web UI; recoverable failures retry; terminal failure remains actionable |
+| A6 | Download stalls, cancellation and HTTP redirect | Stream has timeout; no credential-bearing redirects; cancellation and partial files are explained |
+| A7 | Rotate and simulate process death in a deep project route | Safe route/history restored after session validation; pairing code never replayed |
+| A8 | Revoked permission review then Back | Existing user returns to workspace, not initial Welcome |
+| A9 | Light/dark screenshot review, TalkBack and large font | Semantics, contrast, spacing and focal controls verified against approved baseline |
 
 ## Evidence boundaries
 
