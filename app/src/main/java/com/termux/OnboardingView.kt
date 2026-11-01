@@ -47,6 +47,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         val failureMessage: String?,
         val storagePending: Boolean,
         val notificationsPending: Boolean,
+        val permissionsBusy: Boolean,
         val startup: StartupSnapshot,
     )
 
@@ -85,7 +86,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             show(it.screen, it.title, it.storageGranted, it.storageLinksReady,
                 it.storageSetupFailed, it.storageAttempted, it.notificationsGranted,
                 it.notificationsAttempted, it.failureMessage, it.storagePending,
-                it.notificationsPending, it.startup)
+                it.notificationsPending, it.permissionsBusy, it.startup)
         }
     }
 
@@ -116,11 +117,13 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         failureMessage: String? = null,
         storagePending: Boolean = false,
         notificationsPending: Boolean = false,
+        permissionsBusy: Boolean = false,
         startup: StartupSnapshot = StartupTimeline.describe(StartupEvent.PREPARING_RUNTIME),
     ) {
         val presentation = Presentation(screen, preparationTitle, storageGranted,
             storageLinksReady, storageSetupFailed, storageAttempted, notificationsGranted,
-            notificationsAttempted, failureMessage, storagePending, notificationsPending, startup)
+            notificationsAttempted, failureMessage, storagePending, notificationsPending,
+            permissionsBusy, startup)
         lastPresentation = presentation
         if (previousScreen == screen) {
             refreshDynamic(presentation)
@@ -314,7 +317,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     else -> R.string.onboarding_grant_access
                 })
                 if (text != nextLabel) text = nextLabel
-                isEnabled = !pending
+                isEnabled = !p.permissionsBusy
             }
         }
         updatePermission(storageStatus, storageButton, p.storageGranted, p.storageAttempted,
