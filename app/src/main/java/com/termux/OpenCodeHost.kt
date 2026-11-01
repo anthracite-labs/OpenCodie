@@ -266,8 +266,11 @@ object OpenCodeHost {
      * this exact loopback origin. Do not send Basic credentials: validating
      * the browser session is different from validating the app's password.
      */
-    fun hasValidWebSession(cookies: String): Boolean {
-        if (cookies.isBlank()) return false
+    fun hasValidWebSession(cookies: String): Boolean =
+        verifyWebSession(cookies) == SessionValidation.VALID
+
+    fun verifyWebSession(cookies: String): SessionValidation {
+        if (cookies.isBlank()) return SessionValidation.EXPIRED
         val request = (URL("http://$HOST:$PORT/api/info").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 3_000
@@ -275,13 +278,14 @@ object OpenCodeHost {
             setRequestProperty("Cookie", cookies)
         }
         return try {
-            request.responseCode == 200
+            WebRecoveryPolicy.classifySessionHttp(request.responseCode)
         } catch (_: Exception) {
-            false
+            SessionValidation.TRANSIENT
         } finally {
             request.disconnect()
         }
     }
+
 
     private fun pairingURL(): String {
         val request = connection("POST", "/api/pair")
