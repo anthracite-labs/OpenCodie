@@ -610,15 +610,13 @@ class MainActivity : Activity() {
             }
             STORAGE_SETTINGS_REQUEST -> {
                 finishPermissionRequest(PermissionKind.STORAGE)
-                if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
+                if (hasStoragePermission()) {
                     if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
-                    updateWebViewFileAccess()
-                    updateOnboarding()
                 } else {
-                    updateWebViewFileAccess()
-                    updateOnboarding()
-                    show("Storage access not granted; you can allow it later")
+                    show("Shared-file access is not enabled; you can try again later")
                 }
+                updateWebViewFileAccess()
+                updateOnboarding()
             }
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
@@ -669,7 +667,12 @@ class MainActivity : Activity() {
 
     private fun openAllFilesAccessSettings() {
         if (Build.VERSION.SDK_INT < 30) {
-            finishPermissionRequest(PermissionKind.STORAGE)
+            // Prior to Android 11 this is an ordinary runtime permission;
+            // once granted, the user changes it from the app details page.
+            if (!startForResultSafely(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+                STORAGE_SETTINGS_REQUEST,
+            )) finishPermissionRequest(PermissionKind.STORAGE)
             return
         }
         val specific = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
