@@ -85,6 +85,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateWebViewFileAccess()
+        reviewRevokedPermissions()
         updateOnboarding()
     }
 
@@ -358,6 +359,21 @@ class MainActivity : Activity() {
         ) return false
         return manager.getNotificationChannel(OpenCodeService.CHANNEL_ID)
             ?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    /** Only re-open the permission step when an actual previous grant was lost.
+     * A user who continued while denied is never repeatedly interrupted.
+     */
+    private fun reviewRevokedPermissions() {
+        if (!::onboarding.isInitialized || firstRun != FirstRun.CONTINUE) return
+        val prefs = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+        if (PermissionFlow.shouldReviewRevocation(
+            completed = true,
+            previousStorage = prefs.getBoolean("storage_at_continue", false),
+            storageNow = hasStoragePermission(),
+            previousNotifications = prefs.getBoolean("notifications_at_continue", false),
+            notificationsNow = hasNotificationAccess(),
+        )) firstRun = FirstRun.PERMISSIONS
     }
 
     private fun requestNotificationPermission() {
