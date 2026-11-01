@@ -31,6 +31,20 @@ class OnboardingStateTest {
         )
     }
 
+    @Test fun onboardingMustBeCompletedAndWebUiLoadedBeforeReveal() {
+        assertEquals(false, OnboardingState.canRevealWebView(false, false))
+        assertEquals(false, OnboardingState.canRevealWebView(true, false))
+        assertEquals(false, OnboardingState.canRevealWebView(false, true))
+        assertEquals(true, OnboardingState.canRevealWebView(true, true))
+    }
+
+    @Test fun sharedStoragePromptRequiresOptInAndCompletedBootstrap() {
+        assertEquals(false, OnboardingState.shouldPromptForStorage(false, true, false))
+        assertEquals(false, OnboardingState.shouldPromptForStorage(true, false, false))
+        assertEquals(false, OnboardingState.shouldPromptForStorage(true, true, true))
+        assertEquals(true, OnboardingState.shouldPromptForStorage(true, true, false))
+    }
+
     @Test fun connectionNeverClaimsReadyBeforeWebViewLoads() {
         assertEquals(SetupPhase.CONNECTING, OnboardingState.phase("Ready", null, true))
         assertEquals(SetupPhase.PREPARING, OnboardingState.phase("Preparing Termux runtime", null, false))
