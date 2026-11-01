@@ -83,4 +83,31 @@ class StartupTimelineTest {
         timeline.advance(StartupEvent.UNPACKING_RUNTIME)
         assertEquals(StartupStep.SERVER, timeline.snapshot().active)
     }
+    @Test fun automaticRetryKeepsLastReasonAndDoesNotFlashFatalState() {
+        val timeline = StartupTimeline()
+        timeline.advance(StartupEvent.RUNTIME_READY)
+        timeline.advance(StartupEvent.SERVER_READY)
+        timeline.noteServerFailure("OpenCode server readiness timed out")
+        assertEquals(StartupStep.SERVER, timeline.snapshot().active)
+        assertEquals(false, timeline.snapshot().failed)
+        assertEquals(true, timeline.snapshot().retrying)
+        assertEquals("OpenCode server readiness timed out", timeline.snapshot().lastFailure)
+        timeline.restartServer()
+        assertEquals(true, timeline.snapshot().retrying)
+        assertEquals("OpenCode server readiness timed out", timeline.snapshot().lastFailure)
+        timeline.advance(StartupEvent.WAITING_FOR_SERVER)
+        assertEquals(true, timeline.snapshot().retrying)
+        timeline.advance(StartupEvent.SERVER_READY)
+        assertEquals(false, timeline.snapshot().retrying)
+        assertEquals("OpenCode server readiness timed out", timeline.snapshot().lastFailure)
+    }
+
+    @Test fun fatalInstallerFailureRemainsFatal() {
+        val timeline = StartupTimeline()
+        timeline.advance(StartupEvent.CONFIGURING_PACKAGES)
+        timeline.fail()
+        assertTrue(timeline.snapshot().failed)
+        assertFalse(timeline.snapshot().retrying)
+        assertEquals(StartupStep.PACKAGES, timeline.snapshot().active)
+    }
 }
