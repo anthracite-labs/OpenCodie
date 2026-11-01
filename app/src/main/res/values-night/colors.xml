@@ -11,7 +11,7 @@
     <color name="onboarding_progress">#3B5CF6</color>
     <color name="onboarding_text">#FAFAFA</color>
     <color name="onboarding_secondary">#AEAEAE</color>
-    <color name="onboarding_faint">#808080</color>
+    <color name="onboarding_faint">#929292</color>
     <color name="onboarding_outline">#1AFFFFFF</color>
     <color name="onboarding_on_accent">#161616</color>
     <color name="onboarding_notice">#F17471</color>
