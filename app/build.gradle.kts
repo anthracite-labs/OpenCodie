@@ -25,10 +25,10 @@ android {
 
     defaultConfig {
         applicationId = "com.termux"
-        minSdk = 28
+        minSdk = 29
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Target 28 permits Termux binaries to execute from private app storage;
-        // min <= target is required by AGP.
+        // Android 10+ is the published minimum, while target 28 preserves Termux execution.
         targetSdk = 28
         versionCode = envInt("OPENCODIE_VERSION_CODE", "1")
         versionName = openCodeVersion
