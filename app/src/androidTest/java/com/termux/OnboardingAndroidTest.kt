@@ -115,6 +115,24 @@ class OnboardingAndroidTest {
         }
     }
 
+    @Test fun firstNotificationGrantIsAllowedAfterUserChoosesAllow() {
+        assumeTrue(Build.VERSION.SDK_INT >= 33)
+        val manager = app.getSystemService(NotificationManager::class.java)
+        assumeTrue(manager.getNotificationChannel(OpenCodeService.CHANNEL_ID) == null)
+        assumeTrue(app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_DENIED)
+        openPermissions().use {
+            onView(withTagValue(`is`("permission-notifications-action"))).perform(click())
+            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            assumeTrue(device.wait(Until.hasObject(By.text("Allow")), 8_000L))
+            device.findObject(By.text("Allow")).click()
+            onView(withTagValue(`is`("permission-notifications-status")))
+                .check(matches(withText(R.string.onboarding_allowed)))
+            onView(withTagValue(`is`("permission-notifications-action")))
+                .check(matches(withText(R.string.onboarding_change_access)))
+        }
+    }
+
     @Test fun notificationRetryOpensSettingsAndRefreshesOnReturn() {
         assumeTrue(Build.VERSION.SDK_INT >= 33)
         val manager = app.getSystemService(NotificationManager::class.java)
