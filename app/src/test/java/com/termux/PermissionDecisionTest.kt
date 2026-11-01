@@ -76,4 +76,17 @@ class PermissionDecisionTest {
         assertTrue(state.finish(PermissionKind.NOTIFICATIONS))
         assertEquals(PermissionStatus.NOT_ENABLED, state.presentation(PermissionKind.NOTIFICATIONS, false, true).status)
     }
+    @Test fun restoredPendingRequestRequiresActualFocusLoss() {
+        val original = PermissionDecision()
+        original.begin(PermissionKind.NOTIFICATIONS)
+        val withoutInterruption = PermissionDecision(original.pending, original.hadFocusLoss)
+        assertEquals(null, withoutInterruption.focusReturned())
+        assertEquals(PermissionStatus.REQUESTING,
+            withoutInterruption.presentation(PermissionKind.NOTIFICATIONS, false, false).status)
+        original.lostFocus()
+        val withInterruption = PermissionDecision(original.pending, original.hadFocusLoss)
+        assertEquals(PermissionKind.NOTIFICATIONS, withInterruption.focusReturned())
+        assertEquals(null, withInterruption.pending)
+    }
+
 }
