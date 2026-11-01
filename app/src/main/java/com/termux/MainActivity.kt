@@ -532,7 +532,9 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.app_name))
             .setMessage(lines.joinToString("\n"))
-            .setPositiveButton("Restart server") { _, _ ->
+            .setPositiveButton("Restart server") { dialog, _ ->
+                // Dismiss first: the status overlay owns restart progress from here.
+                dialog.dismiss()
                 Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
                 show(getString(R.string.reconnecting))
             }
