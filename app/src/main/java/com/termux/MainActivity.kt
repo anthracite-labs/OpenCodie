@@ -71,6 +71,8 @@ class MainActivity : Activity() {
     private var fileChooser: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
     private var resumed = false
+    private var permissionDecision = PermissionDecision()
+    private var restoredPendingRequest = false
 
     // termux-setup-storage broadcasts this action from the app's own Termux process.
     private val storageReceiver = object : BroadcastReceiver() {
@@ -90,8 +92,41 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        if (permissionDecision.pending != null) permissionDecision.lostFocus()
         resumed = false
         super.onPause()
+    }
+
+    /** The legacy-target notification popup is OS-owned: no permission callback
+     * fires when the channel is created. Window focus returns only after it closes.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!::onboarding.isInitialized) return
+        if (!hasFocus) {
+            permissionDecision.lostFocus()
+        } else {
+            val resolved = permissionDecision.focusReturned()
+            if (resolved != null) {
+                commitPermissionResolution(resolved)
+            } else if (restoredPendingRequest) {
+                restoredPendingRequest = false
+                permissionDecision.pending?.let { finishPermissionRequest(it) }
+            }
+        }
+    }
+
+    private fun finishPermissionRequest(kind: PermissionKind) {
+        if (permissionDecision.finish(kind)) commitPermissionResolution(kind)
+    }
+
+    private fun commitPermissionResolution(kind: PermissionKind) {
+        getSharedPreferences("opencodie_permissions", MODE_PRIVATE).edit()
+            .putBoolean(
+                if (kind == PermissionKind.NOTIFICATIONS) "notifications_attempted"
+                else "storage_attempted", true,
+            ).apply()
+        updateOnboarding()
     }
 
     override fun onStart() {
@@ -135,6 +170,10 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingDownload = savedInstanceState?.getString("pending_download_url")
+        val restoredKind = savedInstanceState?.getString("pending_permission")
+            ?.let { runCatching { PermissionKind.valueOf(it) }.getOrNull() }
+        permissionDecision = PermissionDecision(restoredKind)
+        restoredPendingRequest = restoredKind != null
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
         val onboardingPrefs = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
@@ -226,17 +265,31 @@ class MainActivity : Activity() {
                 updateOnboarding()
             }
             override fun requestStorage() {
+                if (!permissionDecision.begin(PermissionKind.STORAGE)) return
+                // These are bootstrap *opt-in* flags; UI attempt state is committed
+                // only after Android returns, in commitPermissionResolution().
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
                     .putBoolean("storage_opt_in", true)
                     .putBoolean("storage_prompted", true)
                     .commit()
-                requestStorageAccess()
                 updateOnboarding()
+                if (hasStoragePermission() && !storageSetupFailed) {
+                    openAllFilesAccessSettings()
+                } else {
+                    requestStorageAccess()
+                }
             }
             override fun requestNotifications() {
-                permissionPrefs.edit().putBoolean("notifications_attempted", true).apply()
-                requestNotificationPermission()
+                if (!permissionDecision.begin(PermissionKind.NOTIFICATIONS)) return
                 updateOnboarding()
+                requestNotificationPermission()
+                // Some OEMs do not show the channel-created prompt. If no
+                // permission surface took focus, settle the neutral state.
+                handler.postDelayed({
+                    if (!isDestroyed && permissionDecision.pending == PermissionKind.NOTIFICATIONS &&
+                        resumed && hasWindowFocus()
+                    ) finishPermissionRequest(PermissionKind.NOTIFICATIONS)
+                }, 2_500L)
             }
             override fun continueToWorkspace() {
                 permissionPrefs.edit()
@@ -344,8 +397,10 @@ class MainActivity : Activity() {
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
                     .getBoolean("storage_links_ready", false),
             storageSetupFailed = storageSetupFailed,
-            storageAttempted = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-                .getBoolean("storage_prompted", false),
+            storageAttempted = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+                .getBoolean("storage_attempted", false) ||
+                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+                    .getBoolean("storage_links_ready", false),
             notificationsAttempted = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
                 .getBoolean("notifications_attempted", false),
             failureMessage = if (screen == OnboardingView.Screen.FAILED) {
@@ -359,6 +414,9 @@ class MainActivity : Activity() {
                 }
             } else null,
             notificationsGranted = hasNotificationAccess(),
+            storagePending = permissionDecision.pending == PermissionKind.STORAGE,
+            notificationsPending = permissionDecision.pending == PermissionKind.NOTIFICATIONS,
+            startup = OpenCodeHost.startup.snapshot(),
         )
     }
 
@@ -412,7 +470,7 @@ class MainActivity : Activity() {
             granted = hasNotificationAccess(),
             channelExists = hasChannel,
         )) {
-            NotificationAction.NONE -> Unit
+            NotificationAction.NONE -> openNotificationSettings()
             NotificationAction.CREATE_CHANNEL -> {
                 // On targetSdk 28, Android 13+ shows the first notification
                 // dialog on channel creation while an Activity is running.
@@ -468,6 +526,7 @@ class MainActivity : Activity() {
                             view.url != url
                         ) return@post
                         webUiReady = validSession
+                        if (validSession) OpenCodeHost.startup.advance(StartupEvent.WEBVIEW_READY)
                         if (!validSession) {
                             webPageFailed = true
                             show(getString(R.string.onboarding_web_failure))
@@ -546,8 +605,12 @@ class MainActivity : Activity() {
                     save(url, data.data!!)
                 }
             }
-            NOTIFICATION_SETTINGS_REQUEST -> updateOnboarding()
+            NOTIFICATION_SETTINGS_REQUEST -> {
+                finishPermissionRequest(PermissionKind.NOTIFICATIONS)
+                updateOnboarding()
+            }
             STORAGE_SETTINGS_REQUEST -> {
+                finishPermissionRequest(PermissionKind.STORAGE)
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
                     if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
                     updateWebViewFileAccess()
@@ -567,13 +630,12 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-            if (Build.VERSION.SDK_INT >= 33 &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) show(getString(R.string.onboarding_notification_denied))
+            finishPermissionRequest(PermissionKind.NOTIFICATIONS)
             updateOnboarding()
             return
         }
         if (requestCode != STORAGE_PERMISSION_REQUEST) return
+        finishPermissionRequest(PermissionKind.STORAGE)
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
         } else show("Storage permission denied; you can allow it later")
@@ -606,10 +668,25 @@ class MainActivity : Activity() {
         )) setupStorageLinks()
     }
 
+    private fun openAllFilesAccessSettings() {
+        if (Build.VERSION.SDK_INT < 30) {
+            finishPermissionRequest(PermissionKind.STORAGE)
+            return
+        }
+        val specific = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        if (!startForResultSafely(specific, STORAGE_SETTINGS_REQUEST) &&
+            !startForResultSafely(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                STORAGE_SETTINGS_REQUEST)
+        ) finishPermissionRequest(PermissionKind.STORAGE)
+    }
+
     private fun requestStorageAccess() {
         if (Build.VERSION.SDK_INT >= 30) {
             if (Environment.isExternalStorageManager()) {
                 if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
+                finishPermissionRequest(PermissionKind.STORAGE)
                 updateOnboarding()
                 return
             }
@@ -618,7 +695,8 @@ class MainActivity : Activity() {
             }
             val fallback = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
             if (startForResultSafely(intent, STORAGE_SETTINGS_REQUEST)) return
-            startForResultSafely(fallback, STORAGE_SETTINGS_REQUEST) {
+            if (!startForResultSafely(fallback, STORAGE_SETTINGS_REQUEST)) {
+                finishPermissionRequest(PermissionKind.STORAGE)
                 show("Android storage settings unavailable")
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
@@ -910,6 +988,7 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("pending_download_url", pendingDownload)
         outState.putString("first_run_step", firstRun.name)
+        permissionDecision.pending?.let { outState.putString("pending_permission", it.name) }
         super.onSaveInstanceState(outState)
     }
 
