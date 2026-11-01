@@ -54,7 +54,7 @@ if [ -z "$READELF_BIN" ]; then
         if command -v "$c" >/dev/null 2>&1; then READELF_BIN="$c"; break; fi
     done
 fi
-[ -n "$READELF_BIN" ] || die "no readelf found — install binutils (Termux: pkg install binutils) or set READELF="
+[ -n "$READELF_BIN" ] || die "no readelf found — install binutils (Termux: pkg install binutils) or set READELF to a binary path"
 
 NM_BIN="${NM:-}"
 if [ "$NO_ERRNO" = 1 ] && [ -z "$NM_BIN" ]; then
@@ -66,36 +66,37 @@ fi
 
 for f in "${FILES[@]}"; do
     [ -f "$f" ] || die "no such file: $f"
-    "$READELF_BIN" -h "$f" >/dev/null 2>&1 || die "not an ELF file: $f"
+    HDR="$("$READELF_BIN" -h "$f" 2>&1)" || die "not an ELF file: $f"
     echo "==> $f"
 
     if [ -n "$ARCH" ]; then
-        MACHINE=$("$READELF_BIN" -h "$f" | awk -F: '/Machine/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
-        [ "$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$ARCH" | tr '[:upper:]' '[:lower:]')" ] ||
+        MACHINE=$(printf '%s\n' "$HDR" | awk -F: '/Machine/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+        if [ "${MACHINE,,}" != "${ARCH,,}" ]; then
             die "wrong ELF machine in $f: expected $ARCH, got ${MACHINE:-unknown}"
+        fi
         echo "arch OK: $MACHINE"
     fi
 
     # `|| true`: a file with no dynamic section (static binary) is not a
     # failure here; the NEEDED gates below simply see an empty list.
-    NEED=$("$READELF_BIN" -d "$f" 2>/dev/null | grep NEEDED || true)
+    NEED=$("$READELF_BIN" -d "$f" 2>/dev/null | grep -F NEEDED || true)
     if [ -n "$NEED" ]; then
         echo "$NEED"
     else
         echo "  (no DT_NEEDED)"
     fi
 
-    if [ "$NO_GLIBC" = 1 ] && printf '%s\n' "$NEED" | grep -qE 'libc\.so\.6|libm\.so\.6'; then
+    if [ "$NO_GLIBC" = 1 ] && printf '%s\n' "$NEED" | grep -qF -e 'libc.so.6' -e 'libm.so.6'; then
         die "glibc library needed by $f — glibc-ism leaked into an android artifact:
 $NEED"
     fi
 
-    if [ "$NO_MUSL" = 1 ] && printf '%s\n' "$NEED" | grep -qE 'libc\.musl|ld-musl'; then
+    if [ "$NO_MUSL" = 1 ] && printf '%s\n' "$NEED" | grep -qF -e 'libc.musl' -e 'ld-musl'; then
         die "musl library needed by $f — musl-linked artifact cannot load on bionic:
 $NEED"
     fi
 
-    if [ "$NO_ERRNO" = 1 ] && "$NM_BIN" -D -u "$f" 2>/dev/null | grep -q __errno_location; then
+    if [ "$NO_ERRNO" = 1 ] && "$NM_BIN" -D -u "$f" 2>/dev/null | grep -qF -w __errno_location; then
         die "undefined __errno_location in $f — musl errno shim leaked into the bionic build"
     fi
 done
