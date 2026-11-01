@@ -27,7 +27,7 @@ object OpenCodeHost {
     private const val READY_TIMEOUT_MS = 180_000L
     private const val LOG_LIMIT = 8_000
 
-    val startup = StartupTimeline()
+    internal val startup = StartupTimeline()
     @Volatile var status = "Starting"
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
