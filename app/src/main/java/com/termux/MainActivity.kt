@@ -645,6 +645,10 @@ class MainActivity : Activity() {
             }
             rendererCrashCount++
             Log.w("OpenCodieWeb", if (detail.didCrash()) "Renderer crashed" else "Renderer reclaimed")
+            // Preserve a safe route before disposing the renderer's last usable WebView.
+            restoredWorkspaceUrl = view.url?.takeIf {
+                OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            }
             webUiReady = false
             disposeWebView(view, rendererGone = true)
             webView = createWebView()
