@@ -205,15 +205,15 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     context.getString(R.string.onboarding_storage_title),
                     context.getString(R.string.onboarding_storage_description),
                     actions::requestStorage)
-                storageButton = storage.second
-                storageStatus = storage.first
+                storageButton = storage.second.apply { tag = "permission-storage-action" }
+                storageStatus = storage.first.apply { tag = "permission-storage-status" }
                 space(column, 12)
                 val notifications = permissionItem(column,
                     context.getString(R.string.onboarding_notification_title),
                     context.getString(R.string.onboarding_notification_description),
                     actions::requestNotifications)
-                notificationsButton = notifications.second
-                notificationStatus = notifications.first
+                notificationsButton = notifications.second.apply { tag = "permission-notifications-action" }
+                notificationStatus = notifications.first.apply { tag = "permission-notifications-status" }
             }
             Screen.PREPARING, Screen.CONNECTING -> {
                 space(column, 22)
@@ -315,7 +315,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
 
         fun updatePermission(
             statusView: TextView?, button: Button?, granted: Boolean,
-            attempted: Boolean, pending: Boolean, retrySetup: Boolean = false,
+            attempted: Boolean, pending: Boolean, actionDescription: Int,
+            retrySetup: Boolean = false,
         ) {
             val status = label(granted, attempted, pending)
             if (statusView?.text != status) statusView?.text = status
@@ -327,13 +328,15 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     else -> R.string.onboarding_grant_access
                 })
                 if (text != nextLabel) text = nextLabel
+                contentDescription = context.getString(actionDescription, nextLabel)
                 isEnabled = !p.permissionsBusy
             }
         }
         updatePermission(storageStatus, storageButton, p.storageGranted, p.storageAttempted,
-            p.storagePending, p.storageGranted && p.storageSetupFailed)
+            p.storagePending, R.string.onboarding_storage_action,
+            p.storageGranted && p.storageSetupFailed)
         updatePermission(notificationStatus, notificationsButton, p.notificationsGranted,
-            p.notificationsAttempted, p.notificationsPending)
+            p.notificationsAttempted, p.notificationsPending, R.string.onboarding_notifications_action)
 
         val detail = context.getString(when (p.startup.event) {
             StartupEvent.PREPARING_RUNTIME -> R.string.onboarding_stage_preparing
@@ -397,7 +400,9 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         box.addView(row)
         space(box, 8)
         val status = text(context.getString(R.string.onboarding_not_configured),
-            TypeRole.SUPPORT, accentColor, true)
+            TypeRole.SUPPORT, accentColor, true).apply {
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }
         box.addView(status)
         space(box, 4)
         box.addView(text(description, TypeRole.SUPPORT, secondaryColor))
