@@ -280,7 +280,13 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             }
         }
         refreshDynamic(presentation)
-        headline?.post { if (isAttachedToWindow && previousScreen == screen) headline?.requestFocus() }
+        // Progress may move between PREPARING and CONNECTING without taking
+        // screen-reader focus away from the person's current location.
+        if (screen != Screen.PREPARING && screen != Screen.CONNECTING) {
+            headline?.post {
+                if (isAttachedToWindow && previousScreen == screen) headline?.requestFocus()
+            }
+        }
     }
 
     private fun titleFor(p: Presentation): String = when (p.screen) {
