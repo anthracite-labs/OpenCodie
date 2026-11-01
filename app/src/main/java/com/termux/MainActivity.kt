@@ -336,12 +336,8 @@ class MainActivity : Activity() {
         poll()
     }
 
-    /** Content access follows explicit storage permission; file access stays off.
-     *
-     * WebView loads only the loopback HTTP UI; upload/download use native
-     * pickers + backend. No verified feature needs file:// URLs, and
-     * allowFileAccess also exposes app-private files — so it stays false.
-     * allowContentAccess is gated because picker results are content:// URIs.
+    /** WebView file:// access stays disabled. Android document-picker content://
+     * URIs are separately authorized and need not require all-files access.
      */
     private fun hasStoragePermission(): Boolean =
         if (Build.VERSION.SDK_INT >= 30) {
@@ -378,20 +374,21 @@ class MainActivity : Activity() {
         webView.visibility = View.INVISIBLE
         status.visibility = View.GONE
         retry.visibility = View.GONE
+        val startupSnapshot = OpenCodeHost.startup.snapshot()
         val screen = when (firstRun) {
             FirstRun.WELCOME -> OnboardingView.Screen.WELCOME
             FirstRun.PERMISSIONS -> OnboardingView.Screen.PERMISSIONS
-            FirstRun.CONTINUE -> if (webPageFailed) OnboardingView.Screen.FAILED else when (OnboardingState.phase(
-                OpenCodeHost.status, OpenCodeHost.error, OpenCodeHost.pairingUrl != null,
-            )) {
-                SetupPhase.FAILED -> OnboardingView.Screen.FAILED
-                SetupPhase.CONNECTING -> OnboardingView.Screen.CONNECTING
-                SetupPhase.PREPARING -> OnboardingView.Screen.PREPARING
+            FirstRun.CONTINUE -> when {
+                webPageFailed || startupSnapshot.failed || OpenCodeHost.error != null ->
+                    OnboardingView.Screen.FAILED
+                startupSnapshot.active == StartupStep.WEBVIEW ||
+                    startupSnapshot.active == StartupStep.READY -> OnboardingView.Screen.CONNECTING
+                else -> OnboardingView.Screen.PREPARING
             }
         }
         onboarding.show(
             screen = screen,
-            preparationTitle = OnboardingState.preparationTitle(OpenCodeHost.status),
+            preparationTitle = getString(R.string.onboarding_preparing_title),
             storageGranted = hasStoragePermission(),
             storageLinksReady = hasStoragePermission() &&
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
@@ -417,7 +414,7 @@ class MainActivity : Activity() {
             storagePending = permissionDecision.pending == PermissionKind.STORAGE,
             notificationsPending = permissionDecision.pending == PermissionKind.NOTIFICATIONS,
             permissionsBusy = permissionDecision.pending != null,
-            startup = OpenCodeHost.startup.snapshot(),
+            startup = startupSnapshot,
         )
     }
 
