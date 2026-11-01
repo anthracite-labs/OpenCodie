@@ -49,8 +49,17 @@ jobs:
           emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
           script: |
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest
+            if ./gradlew --no-daemon :app:connectedDebugAndroidTest; then
+              result=0
+            else
+              result=$?
+            fi
             mkdir -p app/build/ui-captures
+            # Preserve the actual on-screen state before restarting the app.
+            adb exec-out screencap -p > app/build/ui-captures/after-tests.png || true
+            if [ "$result" -ne 0 ]; then
+              exit "$result"
+            fi
             adb shell am force-stop com.termux
             adb shell am start -n com.termux/.MainActivity
             sleep 2
