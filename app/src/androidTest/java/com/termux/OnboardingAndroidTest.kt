@@ -71,6 +71,36 @@ class OnboardingAndroidTest {
         }
     }
 
+    @Test fun previouslyGrantedAndNowRevokedStorageReopensPermissionReview() {
+        assumeTrue(Build.VERSION.SDK_INT >= 30)
+        assumeTrue(!android.os.Environment.isExternalStorageManager())
+        app.getSharedPreferences("opencodie_onboarding", Context.MODE_PRIVATE)
+            .edit().putBoolean("completed", true).commit()
+        app.getSharedPreferences("opencodie_permissions", Context.MODE_PRIVATE)
+            .edit().putBoolean("storage_at_continue", true)
+            .putBoolean("storage_attempted", true)
+            .putBoolean("notifications_at_continue", false).commit()
+        ActivityScenario.launch(MainActivity::class.java).use {
+            onView(withText(R.string.onboarding_permissions_headline))
+                .check(matches(isDisplayed()))
+            onView(withTagValue(`is`("permission-storage-status")))
+                .check(matches(withText(R.string.onboarding_not_enabled)))
+        }
+    }
+
+    @Test fun fileAccessSettingsReturnRefreshesNeutralStatus() {
+        assumeTrue(Build.VERSION.SDK_INT >= 30)
+        assumeTrue(!android.os.Environment.isExternalStorageManager())
+        openPermissions().use {
+            onView(withTagValue(`is`("permission-storage-action"))).perform(click())
+            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            device.waitForIdle()
+            device.pressBack()
+            onView(withTagValue(`is`("permission-storage-status")))
+                .check(matches(withText(R.string.onboarding_not_enabled)))
+        }
+    }
+
     @Test fun notificationPendingIsNeutralBeforeUserAnswers() {
         assumeTrue(Build.VERSION.SDK_INT >= 33)
         val manager = app.getSystemService(NotificationManager::class.java)
