@@ -26,6 +26,7 @@ android {
     defaultConfig {
         applicationId = "com.termux"
         minSdk = 28
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Target 28 permits Termux binaries to execute from private app storage;
         // min <= target is required by AGP.
         targetSdk = 28
@@ -82,4 +83,10 @@ dependencies {
     // Instrumentation tests are intentionally not added: pure-JVM tests with
     // injected fakes keep the suite runnable without a device or emulator.
     testImplementation("junit:junit:4.13.2")
+    // Real Android lifecycle/permission UI regression suite (requires a connected test device).
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }
