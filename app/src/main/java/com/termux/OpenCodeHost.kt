@@ -31,6 +31,8 @@ object OpenCodeHost {
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
 
+    @Volatile private var workspaceOverride: String? = null
+
     private var supervisor: Thread? = null
 
     @Volatile private var stopping = false
@@ -56,6 +58,32 @@ object OpenCodeHost {
         process?.destroy()
         process = null
     }
+
+    /**
+     * Switch the server working directory, restarting the supervisor.
+     * Returns false for invalid names (nothing changes). Call off the UI
+     * thread: stopping the old supervisor briefly waits for its exit.
+     */
+    @Synchronized
+    fun switchWorkspace(context: Context, name: String): Boolean {
+        if (!ProjectHub.isValidProjectName(name)) return false
+        workspaceOverride = name
+        val old = supervisor
+        stop()
+        var waits = 0
+        while (old?.isAlive == true && waits < 30) {
+            try {
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+                break
+            }
+            waits++
+        }
+        start(context)
+        return true
+    }
+
+    fun currentWorkspaceName(): String = workspaceOverride ?: "workspace"
 
     private fun supervise(context: Context) {
         try {
@@ -112,7 +140,7 @@ object OpenCodeHost {
 
     private fun launch(context: Context): Process {
         password = storedPassword(context)
-        val workspace = File(Termux.HOME, "projects/workspace")
+        val workspace = ProjectHub.workspaceDir(File(Termux.HOME), workspaceOverride)
         check(workspace.isDirectory || workspace.mkdirs()) { "Cannot create project workspace: $workspace" }
         val command = "exec ${Termux.PREFIX}/bin/opencode serve --hostname $HOST --port $PORT"
         val builder = ProcessBuilder("${Termux.PREFIX}/bin/bash", "-lc", command)

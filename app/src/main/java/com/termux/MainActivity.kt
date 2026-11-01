@@ -51,6 +51,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var retry: Button
+    private lateinit var projects: Button
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -110,6 +111,11 @@ class MainActivity : Activity() {
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
         }
+        projects = Button(this).apply {
+            text = "Projects"
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { showProjectHub() }
+        }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -142,6 +148,14 @@ class MainActivity : Activity() {
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
                 ).apply { bottomMargin = 48 },
+            )
+            addView(
+                projects,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.END,
+                ).apply { topMargin = 16; marginEnd = 16 },
             )
         })
 
@@ -502,6 +516,74 @@ class MainActivity : Activity() {
             .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
             .setOnDismissListener { markSeen() }
             .show()
+    }
+
+    /** Project Hub: recent projects with Git branch/dirty badges + validated switch. */
+    private fun showProjectHub() {
+        Thread {
+            val dir = File(Termux.HOME, "projects")
+            val names = dir.list()
+                ?.filter { File(dir, it).isDirectory && ProjectHub.isValidProjectName(it) }
+                ?: emptyList()
+            val current = OpenCodeHost.currentWorkspaceName()
+            val ordered = ProjectHub.sortForDisplay(names, current)
+            val labels = ordered.map { name ->
+                val mark = if (name == current) "● " else ""
+                mark + name + gitSuffix(File(dir, name))
+            }
+            handler.post {
+                if (isDestroyed || isFinishing) return@post
+                if (ordered.isEmpty()) {
+                    show("No projects yet — create one under ~/projects in the WebUI")
+                    return@post
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Projects (current: $current)")
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        switchProject(ordered[which])
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    private fun gitSuffix(dir: File): String = runCatching {
+        val branch = runGit(dir, "branch", "--show-current").let(ProjectHub::parseBranch)
+            ?: return ""
+        val dirty = runGit(dir, "status", "--porcelain").isNotBlank()
+        " ($branch${if (dirty) " ●" else ""})"
+    }.getOrDefault("")
+
+    private fun runGit(dir: File, vararg args: String): String = try {
+        val proc = ProcessBuilder(listOf("${Termux.PREFIX}/bin/git", "-C", dir.path) + args)
+            .redirectErrorStream(true)
+            .start()
+        if (!proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            ""
+        } else {
+            proc.inputStream.bufferedReader().use { it.readText() }
+        }
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun switchProject(name: String) {
+        show("Switching to $name…")
+        Thread {
+            val ok = OpenCodeHost.switchWorkspace(applicationContext, name)
+            handler.post {
+                if (ok) {
+                    // A new server mints fresh pairing links; never reuse the old session.
+                    observedServerPairing = null
+                    loadedUrl = null
+                    show("Switched to $name")
+                } else {
+                    show("Invalid project name: $name")
+                }
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */
