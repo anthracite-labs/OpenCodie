@@ -52,7 +52,7 @@ class OpenCodeService : Service() {
             .build()
     }
 
-    private companion object {
+    internal companion object {
         const val CHANNEL_ID = "opencode"
         const val NOTIFICATION_ID = 1
     }
