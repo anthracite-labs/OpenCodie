@@ -35,6 +35,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var retry: Button
+    private lateinit var progress: ProgressBar
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -110,6 +112,10 @@ class MainActivity : Activity() {
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
         }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+        }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -135,6 +141,14 @@ class MainActivity : Activity() {
         setContentView(FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            addView(
+                progress,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+                ),
+            )
             addView(
                 retry,
                 FrameLayout.LayoutParams(
@@ -368,24 +382,76 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Streams the loopback response with progress; dialog offers Open on success. */
     private fun save(url: String, destination: Uri) {
-        show(getString(R.string.saving))
+        val fullName = URLUtil.guessFileName(url, null, null)
+        val label = FileTransfer.fileLabel(fullName)
+        show(FileTransfer.progressText(0, -1))
+        handler.post {
+            progress.isIndeterminate = true
+            progress.visibility = View.VISIBLE
+        }
         Thread {
             try {
                 val connection = URL(url).openConnection() as HttpURLConnection
                 CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
                 connection.connectTimeout = 10_000
+                val total = connection.contentLengthLong
+                var bytes = 0L
                 connection.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
                         checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
+                        val buf = ByteArray(8192)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            output.write(buf, 0, n)
+                            bytes += n
+                            val snapshot = bytes
+                            handler.post {
+                                if (total > 0) {
+                                    progress.isIndeterminate = false
+                                    progress.progress = (snapshot * 100 / total).coerceIn(0, 100).toInt()
+                                }
+                                status.text = FileTransfer.progressText(snapshot, total)
+                            }
+                        }
                     }
                 }
-                show(getString(R.string.saved))
+                handler.post {
+                    progress.visibility = View.GONE
+                    showSavedDialog(fullName, label, destination)
+                }
             } catch (e: Exception) {
+                handler.post { progress.visibility = View.GONE }
                 show(getString(R.string.download_failed, e.message ?: e.toString()))
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /** Full filename in the message; truncated chip only on the status line. */
+    private fun showSavedDialog(fullName: String, label: String, destination: Uri) {
+        show(getString(R.string.saved) + ": " + label)
+        if (isDestroyed || isFinishing) return
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.saved))
+            .setMessage(fullName)
+            .setPositiveButton("Open") { _, _ -> openSaved(destination) }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun openSaved(destination: Uri) {
+        try {
+            val type = contentResolver.getType(destination) ?: "*/*"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(destination, type)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            show("No app can open this file")
+        }
     }
 
     /**
