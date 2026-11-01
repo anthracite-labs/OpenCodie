@@ -43,4 +43,5 @@
     <string name="onboarding_web_failure">Could not load the workspace interface. Check the connection and retry.</string>
     <string name="onboarding_storage_failed">Shared files setup failed. Retry setup or view diagnostics.</string>
     <string name="onboarding_storage_connected">Shared files connected.</string>
+    <string name="onboarding_notification_denied">Notification permission was not granted. You can enable it in Settings.</string>
 </resources>
