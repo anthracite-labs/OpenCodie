@@ -258,7 +258,7 @@ class MainActivity : Activity() {
         }
         applyStatusTheme()
         retry = Button(this).apply {
-            text = "Retry"
+            text = getString(R.string.onboarding_retry)
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
@@ -707,7 +707,7 @@ class MainActivity : Activity() {
                 if (hasStoragePermission()) {
                     if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
                 } else {
-                    show("Shared-file access is not enabled; you can try again later")
+                    show(getString(R.string.onboarding_storage_not_enabled))
                 }
                 updateWebViewFileAccess()
                 updateOnboarding()
@@ -729,7 +729,7 @@ class MainActivity : Activity() {
         finishPermissionRequest(PermissionKind.STORAGE)
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
-        } else show("Storage permission denied; you can allow it later")
+        } else show(getString(R.string.onboarding_storage_denied))
         updateWebViewFileAccess()
         updateOnboarding()
     }
@@ -793,7 +793,7 @@ class MainActivity : Activity() {
             if (startForResultSafely(intent, STORAGE_SETTINGS_REQUEST)) return
             if (!startForResultSafely(fallback, STORAGE_SETTINGS_REQUEST)) {
                 finishPermissionRequest(PermissionKind.STORAGE)
-                show("Android storage settings unavailable")
+                show(getString(R.string.onboarding_storage_settings_missing))
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
@@ -885,7 +885,7 @@ class MainActivity : Activity() {
         }
         startForResultSafely(intent, SAVE_FILE_REQUEST) {
             pendingDownload = null
-            show("No file picker available")
+            show(getString(R.string.onboarding_no_file_picker))
         }
     }
 
@@ -933,17 +933,18 @@ class MainActivity : Activity() {
             var cancelled = false
             var partial = false
             try {
-                connection = URL(url).openConnection() as HttpURLConnection
-                connection.instanceFollowRedirects = false
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 15_000
+                val request = URL(url).openConnection() as HttpURLConnection
+                connection = request
+                request.instanceFollowRedirects = false
+                request.connectTimeout = 10_000
+                request.readTimeout = 15_000
                 CookieManager.getInstance().getCookie(url)?.let {
-                    connection.setRequestProperty("Cookie", it)
+                    request.setRequestProperty("Cookie", it)
                 }
-                val statusCode = connection.responseCode
+                val statusCode = request.responseCode
                 check(statusCode in 200..299) { "HTTP $statusCode" }
-                val expected = connection.contentLengthLong
-                connection.inputStream.use { input ->
+                val expected = request.contentLengthLong
+                request.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
                         checkNotNull(output) { "Could not open destination" }
                         val buffer = ByteArray(64 * 1024)
@@ -1136,14 +1137,14 @@ class MainActivity : Activity() {
             "[$code] $error\nStatus: ${OpenCodeHost.status}\nStage: ${snapshot.event.name}"
         )
         AlertDialog.Builder(this)
-            .setTitle("OpenCodie diagnostics")
+            .setTitle(R.string.onboarding_diagnostics_title)
             .setMessage(details.takeLast(2000))
-            .setPositiveButton("Copy") { _, _ ->
+            .setPositiveButton(R.string.onboarding_diagnostics_copy) { _, _ ->
                 val clipboard = getSystemService(ClipboardManager::class.java)
                 clipboard?.setPrimaryClip(ClipData.newPlainText("opencodie-diagnostics", details))
                 show(getString(R.string.onboarding_diagnostics_copied))
             }
-            .setNegativeButton("Close", null)
+            .setNegativeButton(R.string.onboarding_diagnostics_close, null)
             .show()
             .also { dialog ->
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
