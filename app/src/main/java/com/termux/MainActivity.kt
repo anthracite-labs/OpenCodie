@@ -33,6 +33,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -43,6 +44,7 @@ import java.net.URL
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Shows the OpenCode WebUI served by the bundled server on loopback.
@@ -58,7 +60,8 @@ class MainActivity : Activity() {
     private var firstRun = FirstRun.WELCOME
     private var webUiReady = false
     private var webPageFailed = false
-    @Volatile private var storageSetupStarted = false
+    private val storageSetupStarted = AtomicBoolean(false)
+    @Volatile private var storageSetupFailed = false
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -104,6 +107,8 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         applyStatusTheme()
         webView.settings.textZoom = (resources.configuration.fontScale * 100).toInt()
+        onboarding.refreshTheme()
+        updateOnboarding()
     }
 
     // Indices are positional into the intArrayOf() above, not R.styleable refs.
@@ -129,9 +134,19 @@ class MainActivity : Activity() {
         pendingDownload = savedInstanceState?.getString("pending_download_url")
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
-        val completed = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
-            .getBoolean("completed", false)
-        firstRun = if (completed) FirstRun.CONTINUE else FirstRun.WELCOME
+        val onboardingPrefs = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
+        // Decide upgrade migration once, before the first bootstrap is started.
+        if (!onboardingPrefs.contains("completed")) {
+            onboardingPrefs.edit().putBoolean(
+                "completed", File(filesDir, ".opencodie-ready").isFile,
+            ).commit()
+        }
+        val completed = onboardingPrefs.getBoolean("completed", false)
+        firstRun = if (completed) FirstRun.CONTINUE else {
+            savedInstanceState?.getString("first_run_step")?.let {
+                runCatching { FirstRun.valueOf(it) }.getOrNull()
+            }?.takeUnless { it == FirstRun.CONTINUE } ?: FirstRun.WELCOME
+        }
         val density = resources.displayMetrics.density
         val statusPad = (16 * density).toInt()
 
@@ -256,7 +271,11 @@ class MainActivity : Activity() {
     /** Onboarding is presentation only; the existing service owns execution. */
     private fun updateOnboarding() {
         if (!::onboarding.isInitialized) return
-        if (OnboardingState.canRevealWebView(firstRun == FirstRun.CONTINUE, webUiReady)) {
+        val hostReady = OpenCodeHost.error == null &&
+            OpenCodeHost.status == "Ready" && OpenCodeHost.pairingUrl != null
+        if (OnboardingState.canRevealWebView(
+            firstRun == FirstRun.CONTINUE, webUiReady, hostReady, OpenCodeHost.error != null,
+        )) {
             onboarding.visibility = View.GONE
             webView.visibility = View.VISIBLE
             status.visibility = View.GONE
@@ -269,7 +288,7 @@ class MainActivity : Activity() {
         val screen = when (firstRun) {
             FirstRun.WELCOME -> OnboardingView.Screen.WELCOME
             FirstRun.PERMISSIONS -> OnboardingView.Screen.PERMISSIONS
-            FirstRun.CONTINUE -> when (OnboardingState.phase(
+            FirstRun.CONTINUE -> if (webPageFailed) OnboardingView.Screen.FAILED else when (OnboardingState.phase(
                 OpenCodeHost.status, OpenCodeHost.error, OpenCodeHost.pairingUrl != null,
             )) {
                 SetupPhase.FAILED -> OnboardingView.Screen.FAILED
@@ -281,6 +300,9 @@ class MainActivity : Activity() {
             screen = screen,
             preparationTitle = OnboardingState.preparationTitle(OpenCodeHost.status),
             storageGranted = hasStoragePermission(),
+            storageLinksReady = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+                .getBoolean("storage_links_ready", false),
+            storageSetupFailed = storageSetupFailed,
             notificationsGranted = Build.VERSION.SDK_INT < 33 ||
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         )
@@ -303,20 +325,40 @@ class MainActivity : Activity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            if (!webPageFailed &&
-                url.startsWith("http://" + OpenCodeHost.HOST + ":" + OpenCodeHost.PORT + "/") &&
-                !url.contains("/auth/connect/")
+            // A completed navigation does not establish an authenticated session.
+            if (!webPageFailed && OnboardingState.isWorkspaceUrl(
+                    url, OpenCodeHost.HOST, OpenCodeHost.PORT,
+                )
             ) {
-                webUiReady = true
-                updateOnboarding()
-            }
-            // Persist the browser-issued session cookie before the next Activity
-            // instance needs it. Do the synchronous flush off the UI thread.
-            if (url.startsWith("http://${OpenCodeHost.HOST}:${OpenCodeHost.PORT}/") &&
-                !url.contains("/auth/connect/")
-            ) {
+                val pairingAtCheck = OpenCodeHost.pairingUrl
+                val cookies = CookieManager.getInstance().getCookie(url).orEmpty()
+                Thread {
+                    val validSession = runCatching {
+                        OpenCodeHost.hasValidWebSession(cookies)
+                    }.getOrDefault(false)
+                    handler.post {
+                        if (isDestroyed || isFinishing || webPageFailed ||
+                            pairingAtCheck == null || pairingAtCheck != OpenCodeHost.pairingUrl ||
+                            view.url != url
+                        ) return@post
+                        webUiReady = validSession
+                        updateOnboarding()
+                    }
+                }.apply { isDaemon = true }.start()
                 Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
             }
+        }
+
+        override fun onReceivedHttpError(
+            view: WebView, request: WebResourceRequest, response: WebResourceResponse,
+        ) {
+            if (!request.isForMainFrame || response.statusCode < 400) return
+            webPageFailed = true
+            webUiReady = false
+            observedServerPairing = null
+            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
+            show(getString(R.string.onboarding_http_failure, response.statusCode))
+            updateOnboarding()
         }
 
         /** The supervisor restarts a dead server; keep the user informed meanwhile. */
@@ -420,9 +462,13 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (hasStoragePermission() &&
-            !preferences.getBoolean("storage_links_ready", false) && !storageSetupStarted
-        ) setupStorageLinks()
+        if (OnboardingState.shouldAttemptStorageLinks(
+            runtimeReady = true,
+            permissionGranted = hasStoragePermission(),
+            linksReady = preferences.getBoolean("storage_links_ready", false),
+            inFlight = storageSetupStarted.get(),
+            lastAttemptFailed = storageSetupFailed,
+        )) setupStorageLinks()
     }
 
     private fun requestStorageAccess() {
@@ -449,8 +495,8 @@ class MainActivity : Activity() {
 
     /** Idempotent Termux links. Never clear ~/storage or overwrite a user's files. */
     private fun setupStorageLinks() {
-        if (storageSetupStarted) return
-        storageSetupStarted = true
+        if (!storageSetupStarted.compareAndSet(false, true)) return
+        storageSetupFailed = false
         Thread {
             try {
                 val storage = File(Termux.HOME, "storage")
@@ -491,10 +537,17 @@ class MainActivity : Activity() {
                 }
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
                     .putBoolean("storage_links_ready", true).apply()
-                show("Shared files connected")
+                storageSetupFailed = false
+                show(getString(R.string.onboarding_storage_connected))
             } catch (e: Exception) {
+                storageSetupFailed = true
+                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
+                    .putBoolean("storage_links_ready", false).apply()
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
-                show("Could not connect shared files; see diagnostics if needed")
+                show(getString(R.string.onboarding_storage_failed))
+            } finally {
+                storageSetupStarted.set(false)
+                handler.post { if (!isDestroyed && !isFinishing) updateOnboarding() }
             }
         }.apply { isDaemon = true }.start()
     }
@@ -630,6 +683,8 @@ class MainActivity : Activity() {
             Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
         }
         observedServerPairing = null
+        webPageFailed = false
+        webUiReady = false
         nextPairingAttemptAtMs = SystemClock.elapsedRealtime()
         status.visibility = View.VISIBLE
         status.text = getString(R.string.reconnecting)
@@ -637,7 +692,11 @@ class MainActivity : Activity() {
     }
 
     private fun showDiagnostics() {
-        val error = OpenCodeHost.error ?: return
+        val error = OpenCodeHost.error ?: if (storageSetupFailed) {
+            getString(R.string.onboarding_storage_failed)
+        } else if (webPageFailed) {
+            getString(R.string.onboarding_web_failure)
+        } else return
         val code = RuntimeHealth.failureCode(error)
         val details = RuntimeHealth.sanitize("[$code] $error\n\n${OpenCodeHost.sanitizedLog()}")
         AlertDialog.Builder(this)
@@ -657,9 +716,12 @@ class MainActivity : Activity() {
 
     private fun show(message: String) {
         handler.post {
-            status.visibility = View.VISIBLE
-            status.text = message
-            handler.postDelayed({ if (loadedUrl != null) status.visibility = View.GONE }, NOTICE_MS)
+            if (isDestroyed || isFinishing) return@post
+            if (onboarding.visibility == View.VISIBLE) {
+                onboarding.setNotice(message)
+            } else {
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -686,7 +748,7 @@ class MainActivity : Activity() {
         if (firstRun == FirstRun.PERMISSIONS) {
             firstRun = FirstRun.WELCOME
             updateOnboarding()
-        } else if (webUiReady && webView.canGoBack()) {
+        } else if (webView.visibility == View.VISIBLE && webView.canGoBack()) {
             webView.goBack()
         } else {
             super.onBackPressed()
@@ -695,6 +757,7 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("pending_download_url", pendingDownload)
+        outState.putString("first_run_step", firstRun.name)
         super.onSaveInstanceState(outState)
     }
 
