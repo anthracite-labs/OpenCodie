@@ -201,6 +201,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             gravity = Gravity.CENTER
             minimumHeight = dp(48)
             minimumWidth = dp(64)
+            contentDescription = if (granted) "$title allowed" else "Allow $title"
             isEnabled = !granted
             isClickable = !granted
             isFocusable = !granted
