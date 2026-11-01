@@ -22,6 +22,11 @@ class BuildContractTest(unittest.TestCase):
         for s in items:
             self.assertIn(s, text)
 
+    def test_termux_execution_compatibility(self):
+        gradle = read("app/build.gradle.kts")
+        self.assertIn("minSdk = 28", gradle)
+        self.assertIn("targetSdk = 28", gradle)
+
     def test_version_tracks_opencode_runtime_lock(self):
         gradle = read("app/build.gradle.kts")
         self.assertIn('startsWith("OPENCODE_VERSION=")', gradle)

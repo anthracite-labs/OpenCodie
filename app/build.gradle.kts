@@ -25,10 +25,10 @@ android {
 
     defaultConfig {
         applicationId = "com.termux"
-        minSdk = 29
-        // Kept at 29 (not latest) so requestLegacyExternalStorage keeps working
-        // for the Termux storage bridge; min <= target is required by AGP.
-        targetSdk = 29
+        minSdk = 28
+        // Target 28 permits Termux binaries to execute from private app storage;
+        // min <= target is required by AGP.
+        targetSdk = 28
         versionCode = envInt("OPENCODIE_VERSION_CODE", "1")
         versionName = openCodeVersion
         ndk { abiFilters += "arm64-v8a" }
@@ -37,7 +37,7 @@ android {
     buildFeatures { buildConfig = true }
 
     lint {
-        // Target 29 is intentionally expired (see above); keep the build green
+        // Target 28 is intentionally expired (see above); keep the build green
         // while the legacy storage bridge is still required.
         disable += "ExpiredTargetSdkVersion"
     }
