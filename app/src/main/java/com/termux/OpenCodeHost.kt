@@ -67,6 +67,29 @@ object OpenCodeHost {
     @Synchronized
     fun switchWorkspace(context: Context, name: String): Boolean {
         if (!ProjectHub.isValidProjectName(name)) return false
+        stopAndWaitLocked()
+        // Latch only after the old supervisor exits: a failed stop must not
+        // leave the next auto-restart pointed at a directory the UI never
+        // confirmed.
+        workspaceOverride = name
+        start(context)
+        return true
+    }
+
+    fun currentWorkspaceName(): String = workspaceOverride ?: "workspace"
+
+    /**
+     * Settings action: restart the server without changing the workspace.
+     * Call off the UI thread; briefly waits for the old supervisor's exit.
+     */
+    @Synchronized
+    fun restart(context: Context) {
+        stopAndWaitLocked()
+        start(context)
+    }
+
+    /** Caller must hold the monitor: stop the supervisor and await its exit. */
+    private fun stopAndWaitLocked() {
         val old = supervisor
         stop()
         var waits = 0
@@ -78,16 +101,7 @@ object OpenCodeHost {
             }
             waits++
         }
-        // Latch only after the old supervisor exits: a failed stop must not
-        // leave the next auto-restart pointed at a directory the UI never
-        // confirmed.
-        workspaceOverride = name
-        start(context)
-        return true
     }
-
-    fun currentWorkspaceName(): String = workspaceOverride ?: "workspace"
-
     private fun supervise(context: Context) {
         try {
             RuntimeInstaller.installIfNeeded(context) { status = it }

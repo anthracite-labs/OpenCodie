@@ -55,6 +55,7 @@ class MainActivity : Activity() {
     private lateinit var retry: Button
     private lateinit var projects: Button
     private lateinit var progress: ProgressBar
+    private lateinit var settings: Button
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -123,6 +124,11 @@ class MainActivity : Activity() {
             max = 100
             visibility = View.GONE
         }
+        settings = Button(this).apply {
+            text = "About"
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { showSettings() }
+        }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -176,6 +182,14 @@ class MainActivity : Activity() {
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.TOP or Gravity.END,
                 ).apply { topMargin = 16; marginEnd = 16 },
+            )
+            addView(
+                settings,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.START,
+                ).apply { topMargin = 16; marginStart = 16 },
             )
         })
 
@@ -667,6 +681,33 @@ class MainActivity : Activity() {
                 }
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /** Settings & About: version, server, workspace, storage + actions. */
+    private fun showSettings() {
+        val lines = Settings.summaryLines(
+            SettingsState(
+                appVersion = BuildConfig.VERSION_NAME,
+                serverStatus = OpenCodeHost.status,
+                serverError = OpenCodeHost.error,
+                workspacePath = File(Termux.HOME, "projects/" + OpenCodeHost.currentWorkspaceName()).path,
+                storageGranted = hasStoragePermission(),
+            ),
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage(lines.joinToString("\n"))
+            .setPositiveButton("Restart server") { dialog, _ ->
+                // Dismiss first: the status overlay owns restart progress from here.
+                dialog.dismiss()
+                Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
+                show(getString(R.string.reconnecting))
+            }
+            .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
+            .setNegativeButton("Licenses") { _, _ ->
+                openExternally(Uri.parse(Settings.SOURCE_URL))
+            }
+            .show()
     }
 
     /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */
