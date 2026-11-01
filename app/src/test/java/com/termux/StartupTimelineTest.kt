@@ -46,6 +46,29 @@ class StartupTimelineTest {
         assertEquals(snapshot.completedCount, StartupTimeline.describe(snapshot.event).completedCount)
     }
 
+    @Test fun verifiedRuntimeStepsRemainDoneAfterServerRestart() {
+        val timeline = StartupTimeline()
+        timeline.advance(StartupEvent.RUNTIME_READY)
+        timeline.advance(StartupEvent.SERVER_READY)
+        timeline.advance(StartupEvent.WEBVIEW_READY)
+        timeline.restartServer()
+        assertEquals(StartupStep.SERVER, timeline.snapshot().active)
+        assertEquals(2, timeline.snapshot().completedCount)
+        timeline.advance(StartupEvent.SERVER_READY)
+        assertEquals(StartupStep.WEBVIEW, timeline.snapshot().active)
+    }
+
+    @Test fun actualFailureRetainsItsLastStageUntilARealRetry() {
+        val timeline = StartupTimeline()
+        timeline.advance(StartupEvent.CONFIGURING_PACKAGES)
+        timeline.fail()
+        assertEquals(true, timeline.snapshot().failed)
+        assertEquals(StartupStep.PACKAGES, timeline.snapshot().active)
+        timeline.advance(StartupEvent.VERIFYING_INSTALL)
+        assertEquals(false, timeline.snapshot().failed)
+        assertEquals(StartupStep.PACKAGES, timeline.snapshot().active)
+    }
+
     @Test fun noPercentWithoutMeasuredWork() {
         val timeline = StartupTimeline()
         timeline.advance(StartupEvent.UNPACKING_RUNTIME)
