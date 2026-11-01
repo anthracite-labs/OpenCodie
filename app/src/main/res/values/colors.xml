@@ -1,11 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="onboarding_background">#FAF9FE</color>
-    <color name="onboarding_surface">#F0EDF9</color>
-    <color name="onboarding_accent">#6D4BCC</color>
-    <color name="onboarding_text">#171321</color>
-    <color name="onboarding_secondary">#514B60</color>
-    <color name="onboarding_outline">#C7C0D6</color>
+    <!-- OpenCode v2 light semantic equivalents; see upstream tokens/theme.css. -->
+    <color name="onboarding_background">#FFFFFF</color>
+    <color name="onboarding_deep">#F2F2F2</color>
+    <color name="onboarding_surface">#F2F2F2</color>
+    <color name="onboarding_raised">#EEEEEE</color>
+    <color name="onboarding_primary">#242424</color>
+    <color name="onboarding_on_primary">#FAFAFA</color>
+    <color name="onboarding_accent">#3B5CF6</color>
+    <color name="onboarding_progress">#3B5CF6</color>
+    <color name="onboarding_text">#161616</color>
+    <color name="onboarding_secondary">#5C5C5C</color>
+    <color name="onboarding_faint">#5C5C5C</color>
+    <color name="onboarding_outline">#1A000000</color>
     <color name="onboarding_on_accent">#FFFFFF</color>
-    <color name="onboarding_notice">#8A2650</color>
+    <color name="onboarding_notice">#B82D35</color>
+    <color name="onboarding_success">#198B43</color>
+    <color name="onboarding_ripple">#14000000</color>
 </resources>

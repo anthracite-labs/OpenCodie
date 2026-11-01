@@ -10,6 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -52,6 +53,13 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     private val borderColor get() = context.getColor(R.color.onboarding_outline)
     private val buttonTextColor get() = context.getColor(R.color.onboarding_on_accent)
     private val noticeColor get() = context.getColor(R.color.onboarding_notice)
+    private val faintColor get() = context.getColor(R.color.onboarding_faint)
+    private val raisedColor get() = context.getColor(R.color.onboarding_raised)
+    private val primaryColor get() = context.getColor(R.color.onboarding_primary)
+    private val onPrimaryColor get() = context.getColor(R.color.onboarding_on_primary)
+    private val successColor get() = context.getColor(R.color.onboarding_success)
+    private val progressColor get() = context.getColor(R.color.onboarding_progress)
+    private val rippleColor get() = context.getColor(R.color.onboarding_ripple)
 
     private var previousScreen: Screen? = null
     private var lastPresentation: Presentation? = null
@@ -136,7 +144,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         }
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setPadding(dp(24), dp(24), dp(24), dp(28))
         }
         scroll.addView(column, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -155,13 +163,18 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             else -> R.string.onboarding_workspace_tag
         }), TypeRole.CAPTION, secondaryColor, true))
         column.addView(header)
-        if (screen == Screen.PREPARING || screen == Screen.CONNECTING) {
-            // Give real progress the space previously occupied by the duplicate logo.
-            space(column, 28)
-        } else {
-            space(column, 32)
-            column.addView(mark(dp(80)), LinearLayout.LayoutParams(dp(80), dp(80)))
-            space(column, 28)
+        when (screen) {
+            Screen.WELCOME -> {
+                space(column, 56)
+                column.addView(mark(dp(76)), LinearLayout.LayoutParams(dp(76), dp(76)))
+                space(column, 28)
+            }
+            Screen.PREPARING, Screen.CONNECTING -> space(column, 42)
+            else -> {
+                space(column, 32)
+                column.addView(mark(dp(56)), LinearLayout.LayoutParams(dp(56), dp(56)))
+                space(column, 24)
+            }
         }
 
         headline = text(titleFor(presentation), TypeRole.HERO, titleColor, true).apply {
@@ -187,20 +200,26 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         }
 
         when (screen) {
+            Screen.WELCOME -> {
+                space(column, 28)
+                workspacePreview(column)
+            }
             Screen.PERMISSIONS -> {
                 space(column, 18)
                 val storage = permissionItem(column,
                     context.getString(R.string.onboarding_storage_title),
                     context.getString(R.string.onboarding_storage_description),
-                    actions::requestStorage)
+                    android.R.drawable.ic_menu_save, actions::requestStorage)
                 storageButton = storage.second.apply { tag = "permission-storage-action" }
+                (storage.first.parent as View).tag = "permission-storage-card"
                 storageStatus = storage.first.apply { tag = "permission-storage-status" }
                 space(column, 12)
                 val notifications = permissionItem(column,
                     context.getString(R.string.onboarding_notification_title),
                     context.getString(R.string.onboarding_notification_description),
-                    actions::requestNotifications)
+                    android.R.drawable.ic_dialog_info, actions::requestNotifications)
                 notificationsButton = notifications.second.apply { tag = "permission-notifications-action" }
+                (notifications.first.parent as View).tag = "permission-notifications-card"
                 notificationStatus = notifications.first.apply { tag = "permission-notifications-status" }
             }
             Screen.PREPARING, Screen.CONNECTING -> {
@@ -209,14 +228,19 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     orientation = LinearLayout.VERTICAL
                     background = rounded(surfaceColor, dp(16), borderColor)
                     setPadding(dp(18), dp(18), dp(18), dp(18))
+                    tag = "onboarding-setup-card"
                 }
+                state.addView(text(context.getString(R.string.onboarding_setup_label),
+                    TypeRole.CAPTION, faintColor, true))
+                space(state, 16)
                 startupDetail = text("", TypeRole.LABEL, titleColor, true).apply {
                     accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
                 }.also { state.addView(it) }
                 space(state, 12)
                 val activityIndicator = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
                     isIndeterminate = true
-                    indeterminateTintList = ColorStateList.valueOf(accentColor)
+                    indeterminateTintList = ColorStateList.valueOf(progressColor)
+                    progressBackgroundTintList = ColorStateList.valueOf(raisedColor)
                     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
                 state.addView(activityIndicator, LinearLayout.LayoutParams(-1, dp(4)))
@@ -227,8 +251,9 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     R.string.onboarding_step_server,
                     R.string.onboarding_step_workspace,
                 )
-                startupRows = labels.map { label ->
-                    text(context.getString(label), TypeRole.LABEL, secondaryColor).also {
+                startupRows = labels.mapIndexed { index, label ->
+                    text(context.getString(label), TypeRole.LABEL, faintColor).also {
+                        it.tag = "startup-step-$index"
                         state.addView(it)
                         space(state, 14)
                     }
@@ -242,27 +267,35 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             else -> Unit
         }
 
-        space(column, 36)
+        if (screen == Screen.WELCOME) {
+            column.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
+            space(column, 28)
+        } else {
+            space(column, 32)
+        }
         when (screen) {
-            Screen.WELCOME -> primary(column, context.getString(R.string.onboarding_get_started), actions::getStarted)
+            Screen.WELCOME -> primary(column,
+                context.getString(R.string.onboarding_get_started), actions::getStarted).apply {
+                tag = "onboarding-primary-action"
+            }
             Screen.PERMISSIONS -> {
-                primary(column, context.getString(R.string.onboarding_continue), actions::continueToWorkspace)
+                primary(column, context.getString(R.string.onboarding_continue),
+                    actions::continueToWorkspace).apply { tag = "onboarding-primary-action" }
                 space(column, 12)
                 column.addView(text(context.getString(R.string.onboarding_settings_note),
                     TypeRole.CAPTION, secondaryColor).apply { gravity = Gravity.CENTER })
             }
             Screen.FAILED -> {
-                column.addView(text(context.getString(
-                    R.string.onboarding_stage_failed,
-                    context.getString(when (presentation.startup.active) {
-                        StartupStep.RUNTIME -> R.string.onboarding_step_runtime
-                        StartupStep.PACKAGES -> R.string.onboarding_step_packages
-                        StartupStep.SERVER -> R.string.onboarding_step_server
-                        StartupStep.WEBVIEW, StartupStep.READY -> R.string.onboarding_step_workspace
-                    }),
-                ), TypeRole.SUPPORT, noticeColor))
+                val stageName = context.getString(when (presentation.startup.active) {
+                    StartupStep.RUNTIME -> R.string.onboarding_step_runtime
+                    StartupStep.PACKAGES -> R.string.onboarding_step_packages
+                    StartupStep.SERVER -> R.string.onboarding_step_server
+                    StartupStep.WEBVIEW, StartupStep.READY -> R.string.onboarding_step_workspace
+                })
+                failureCard(column, context.getString(R.string.onboarding_stage_failed, stageName))
                 space(column, 20)
-                primary(column, context.getString(R.string.onboarding_retry), actions::retry)
+                primary(column, context.getString(R.string.onboarding_retry),
+                    actions::retry).apply { tag = "onboarding-retry-action" }
                 space(column, 12)
                 secondary(column, context.getString(R.string.onboarding_diagnostics), actions::diagnostics)
             }
@@ -318,6 +351,12 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                 PermissionStatus.NOT_ENABLED -> R.string.onboarding_not_enabled
             })
             if (statusView?.text != status) statusView?.text = status
+            statusView?.setTextColor(when (presentation.status) {
+                PermissionStatus.ALLOWED -> successColor
+                PermissionStatus.REQUESTING -> accentColor
+                PermissionStatus.NOT_ENABLED -> secondaryColor
+                PermissionStatus.GRANT -> faintColor
+            })
             button?.apply {
                 val nextLabel = context.getString(when (presentation.action) {
                     PermissionAction.GRANT -> R.string.onboarding_grant_access
@@ -373,14 +412,57 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             }
             val value = "$glyph  $label"
             if (row.text != value) row.text = value
-            row.setTextColor(if (index == p.startup.completedCount) accentColor else secondaryColor)
+            row.setTextColor(when {
+                index < p.startup.completedCount -> successColor
+                index == p.startup.completedCount && p.startup.failed -> noticeColor
+                index == p.startup.completedCount -> accentColor
+                else -> faintColor
+            })
         }
+    }
+
+    private fun workspacePreview(parent: LinearLayout) {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(surfaceColor, dp(16), borderColor)
+            setPadding(dp(20), dp(18), dp(20), dp(18))
+            tag = "onboarding-workspace-preview"
+        }
+        card.addView(text(context.getString(R.string.onboarding_preview_label),
+            TypeRole.CAPTION, faintColor, true))
+        space(card, 14)
+        card.addView(text(context.getString(R.string.onboarding_preview_path),
+            TypeRole.ACTION, titleColor).apply {
+            typeface = Typeface.create("monospace", Typeface.NORMAL)
+        })
+        space(card, 12)
+        card.addView(View(context).apply { setBackgroundColor(borderColor) },
+            LinearLayout.LayoutParams(-1, dp(1)))
+        space(card, 12)
+        card.addView(text(context.getString(R.string.onboarding_preview_tools),
+            TypeRole.SUPPORT, secondaryColor))
+        parent.addView(card, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun failureCard(parent: LinearLayout, stage: String) {
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(surfaceColor, dp(16), borderColor)
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            tag = "onboarding-failure-card"
+        }
+        card.addView(text(context.getString(R.string.onboarding_failure_label),
+            TypeRole.CAPTION, noticeColor, true))
+        space(card, 12)
+        card.addView(text(stage, TypeRole.LABEL, titleColor, true))
+        parent.addView(card, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun permissionItem(
         parent: LinearLayout,
         title: String,
         description: String,
+        iconRes: Int,
         action: () -> Unit,
     ): Pair<TextView, Button> {
         val box = LinearLayout(context).apply {
@@ -392,23 +474,30 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(text(title, TypeRole.ACTION, titleColor, true),
-            LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(ImageView(context).apply {
+            setImageResource(iconRes)
+            setColorFilter(secondaryColor)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(22), dp(22)))
+        val titleLabel = text(title, TypeRole.ACTION, titleColor, true).apply {
+            setPaddingRelative(dp(12), 0, dp(8), 0)
+        }
+        row.addView(titleLabel, LinearLayout.LayoutParams(0, -2, 1f))
         val control = Button(context).apply {
             textSize = TypeRole.SUPPORT.sp
             isAllCaps = false
             minHeight = dp(48)
             minWidth = dp(72)
             setTextColor(accentColor)
-            background = RippleDrawable(ColorStateList.valueOf(0x22B9A4FF),
-                rounded(surfaceColor, dp(12), borderColor), null)
+            background = RippleDrawable(ColorStateList.valueOf(rippleColor),
+                rounded(raisedColor, dp(12), borderColor), null)
             setOnClickListener { action() }
         }
         row.addView(control)
         box.addView(row)
         space(box, 8)
         val status = text(context.getString(R.string.onboarding_not_configured),
-            TypeRole.SUPPORT, accentColor, true).apply {
+            TypeRole.SUPPORT, faintColor, true).apply {
                 accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             }
         box.addView(status)
@@ -423,24 +512,25 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         textSize = if (size > dp(50)) 29f else 20f
         typeface = Typeface.create("monospace", Typeface.BOLD)
         gravity = Gravity.CENTER
-        setTextColor(accentColor)
-        background = rounded(surfaceColor, dp(16))
+        setTextColor(titleColor)
+        background = rounded(surfaceColor, dp(16), borderColor)
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         layoutParams = LinearLayout.LayoutParams(size, size)
     }
 
-    private fun primary(parent: LinearLayout, label: String, action: () -> Unit) {
+    private fun primary(parent: LinearLayout, label: String, action: () -> Unit): Button {
         val button = Button(context).apply {
             text = label
             textSize = TypeRole.ACTION.sp
             isAllCaps = false
             minHeight = dp(54)
-            setTextColor(buttonTextColor)
-            background = RippleDrawable(ColorStateList.valueOf(0x33000000),
-                rounded(accentColor, dp(14)), null)
+            setTextColor(onPrimaryColor)
+            background = RippleDrawable(ColorStateList.valueOf(rippleColor),
+                rounded(primaryColor, dp(14), borderColor), null)
             setOnClickListener { action() }
         }
         parent.addView(button, LinearLayout.LayoutParams(-1, -2))
+        return button
     }
 
     private fun secondary(parent: LinearLayout, label: String, action: () -> Unit): Button {
@@ -450,7 +540,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             isAllCaps = false
             minHeight = dp(48)
             setTextColor(accentColor)
-            background = rounded(surfaceColor, dp(14), borderColor)
+            background = RippleDrawable(ColorStateList.valueOf(rippleColor),
+                rounded(surfaceColor, dp(14), borderColor), null)
             setOnClickListener { action() }
         }
         parent.addView(button, LinearLayout.LayoutParams(-1, -2))
