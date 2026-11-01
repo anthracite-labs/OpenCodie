@@ -441,7 +441,7 @@ class MainActivity : Activity() {
                 show("Android storage settings unavailable")
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-            setupStorageLinks()
+            if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
         } else {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_PERMISSION_REQUEST)
         }
