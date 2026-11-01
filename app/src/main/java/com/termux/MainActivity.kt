@@ -4,6 +4,8 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -142,7 +144,17 @@ class MainActivity : Activity() {
             ).commit()
         }
         val completed = onboardingPrefs.getBoolean("completed", false)
-        firstRun = if (completed) FirstRun.CONTINUE else {
+        val permissionPrefs = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+        val reviewRevoked = PermissionFlow.shouldReviewRevocation(
+            completed = completed,
+            previousStorage = permissionPrefs.getBoolean("storage_at_continue", false),
+            storageNow = hasStoragePermission(),
+            previousNotifications = permissionPrefs.getBoolean("notifications_at_continue", false),
+            notificationsNow = hasNotificationAccess(),
+        )
+        firstRun = if (completed) {
+            if (reviewRevoked) FirstRun.PERMISSIONS else FirstRun.CONTINUE
+        } else {
             savedInstanceState?.getString("first_run_step")?.let {
                 runCatching { FirstRun.valueOf(it) }.getOrNull()
             }?.takeUnless { it == FirstRun.CONTINUE } ?: FirstRun.WELCOME
@@ -210,13 +222,25 @@ class MainActivity : Activity() {
                 updateOnboarding()
             }
             override fun requestNotifications() {
+                permissionPrefs.edit().putBoolean("notifications_attempted", true).apply()
                 requestNotificationPermission()
                 updateOnboarding()
             }
             override fun continueToWorkspace() {
+                permissionPrefs.edit()
+                    .putBoolean("storage_at_continue", hasStoragePermission())
+                    .putBoolean("notifications_at_continue", hasNotificationAccess())
+                    .putBoolean("storage_attempted",
+                        permissionPrefs.getBoolean("storage_attempted", false) || hasStoragePermission())
+                    .putBoolean("notifications_attempted",
+                        permissionPrefs.getBoolean("notifications_attempted", false) || hasNotificationAccess())
+                    .commit()
                 getSharedPreferences("opencodie_onboarding", MODE_PRIVATE).edit()
-                    .putBoolean("completed", true).apply()
+                    .putBoolean("completed", true).commit()
                 firstRun = FirstRun.CONTINUE
+                // The first notification channel is no longer created on Welcome:
+                // legacy-target Android 13+ would otherwise prompt before the user acts.
+                startForegroundService(Intent(this@MainActivity, OpenCodeService::class.java))
                 updateOnboarding()
             }
             override fun retry() = retryCheckNow()
@@ -240,7 +264,9 @@ class MainActivity : Activity() {
         }
         setContentView(root)
 
-        startForegroundService(Intent(this, OpenCodeService::class.java))
+        if (PermissionFlow.shouldStartHost(completed)) {
+            startForegroundService(Intent(this, OpenCodeService::class.java))
+        }
         updateOnboarding()
         poll()
     }
@@ -262,7 +288,9 @@ class MainActivity : Activity() {
     private fun updateWebViewFileAccess() {
         if (!::webView.isInitialized) return
         webView.settings.allowFileAccess = false
-        webView.settings.allowContentAccess = hasStoragePermission()
+        // User-chosen content:// URIs from the system picker do NOT depend on
+        // broad MANAGE_EXTERNAL_STORAGE access.
+        webView.settings.allowContentAccess = true
         // Never enable file-URL inheritance: blocks file:// exfiltration.
         webView.settings.allowFileAccessFromFileURLs = false
         webView.settings.allowUniversalAccessFromFileURLs = false
@@ -304,6 +332,10 @@ class MainActivity : Activity() {
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
                     .getBoolean("storage_links_ready", false),
             storageSetupFailed = storageSetupFailed,
+            storageAttempted = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+                .getBoolean("storage_prompted", false),
+            notificationsAttempted = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+                .getBoolean("notifications_attempted", false),
             failureMessage = if (screen == OnboardingView.Screen.FAILED) {
                 val hostError = OpenCodeHost.error
                 when {
@@ -314,16 +346,55 @@ class MainActivity : Activity() {
                     else -> null
                 }
             } else null,
-            notificationsGranted = Build.VERSION.SDK_INT < 33 ||
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+            notificationsGranted = hasNotificationAccess(),
         )
     }
 
-    private fun requestNotificationPermission() {
+    private fun hasNotificationAccess(): Boolean {
+        val manager = getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
+        ) return false
+        return manager.getNotificationChannel(OpenCodeService.CHANNEL_ID)
+            ?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    private fun requestNotificationPermission() {
+        val manager = getSystemService(NotificationManager::class.java)
+        val hasChannel = manager?.getNotificationChannel(OpenCodeService.CHANNEL_ID) != null
+        when (PermissionFlow.notificationAction(
+            androidApi = Build.VERSION.SDK_INT,
+            granted = hasNotificationAccess(),
+            channelExists = hasChannel,
+        )) {
+            NotificationAction.NONE -> Unit
+            NotificationAction.CREATE_CHANNEL -> {
+                // On targetSdk 28, Android 13+ shows the first notification
+                // dialog on channel creation while an Activity is running.
+                // Do not create it on Welcome or issue a competing request.
+                manager?.createNotificationChannel(
+                    NotificationChannel(
+                        OpenCodeService.CHANNEL_ID,
+                        getString(R.string.onboarding_notification_channel),
+                        NotificationManager.IMPORTANCE_LOW,
+                    ),
+                ) ?: openNotificationSettings()
+            }
+            NotificationAction.OPEN_SETTINGS -> openNotificationSettings()
+        }
+    }
+
+    private fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        }
+        if (!startForResultSafely(intent, NOTIFICATION_SETTINGS_REQUEST)) {
+            startForResultSafely(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")),
+                NOTIFICATION_SETTINGS_REQUEST,
+            ) { show(getString(R.string.onboarding_notification_settings_missing)) }
         }
     }
 
@@ -431,6 +502,7 @@ class MainActivity : Activity() {
                     save(url, data.data!!)
                 }
             }
+            NOTIFICATION_SETTINGS_REQUEST -> updateOnboarding()
             STORAGE_SETTINGS_REQUEST -> {
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
                     if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
@@ -815,6 +887,7 @@ class MainActivity : Activity() {
         const val STORAGE_PERMISSION_REQUEST = 3
         const val STORAGE_SETTINGS_REQUEST = 4
         const val NOTIFICATION_PERMISSION_REQUEST = 5
+        const val NOTIFICATION_SETTINGS_REQUEST = 6
         const val STORAGE_ACTION = "com.termux.app.reload_style"
     }
 }
