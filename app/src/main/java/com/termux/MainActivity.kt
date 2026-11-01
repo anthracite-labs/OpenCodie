@@ -72,6 +72,7 @@ class MainActivity : Activity() {
     private var rendererCrashWindowMs = 0L
     private var rendererCrashCount = 0
     private val downloadCancelled = AtomicBoolean(false)
+    private val downloadInProgress = AtomicBoolean(false)
     private var downloadDialog: AlertDialog? = null
     private lateinit var status: TextView
     private lateinit var retry: Button
@@ -888,23 +889,114 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Stream a local download to the Android document picker without a blocking dialog. */
+    /** Stream an authenticated loopback response with bounded reads and cancellation. */
     private fun save(url: String, destination: Uri) {
-        show(getString(R.string.saving))
+        val source = Uri.parse(url)
+        if (source.scheme != "http" || source.host != OpenCodeHost.HOST ||
+            source.port != OpenCodeHost.PORT
+        ) {
+            show(getString(R.string.download_failed, getString(R.string.onboarding_invalid_download)))
+            return
+        }
+        if (!downloadInProgress.compareAndSet(false, true)) {
+            show(getString(R.string.onboarding_download_busy))
+            return
+        }
+        downloadCancelled.set(false)
+        val progressLabel = TextView(this).apply {
+            text = getString(R.string.onboarding_download_in_progress)
+            setPadding(32, 20, 32, 8)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+        }
+        val contents = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(progressLabel)
+            addView(progressBar, LinearLayout.LayoutParams(-1, 8).apply {
+                leftMargin = 32
+                rightMargin = 32
+                bottomMargin = 24
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.saving)
+            .setView(contents)
+            .setNegativeButton(android.R.string.cancel) { _, _ -> downloadCancelled.set(true) }
+            .create()
+        downloadDialog = dialog
+        dialog.show()
         Thread {
+            var connection: HttpURLConnection? = null
+            var completed = false
+            var cancelled = false
+            var partial = false
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
-                CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
+                connection = URL(url).openConnection() as HttpURLConnection
+                connection.instanceFollowRedirects = false
                 connection.connectTimeout = 10_000
+                connection.readTimeout = 15_000
+                CookieManager.getInstance().getCookie(url)?.let {
+                    connection.setRequestProperty("Cookie", it)
+                }
+                val statusCode = connection.responseCode
+                check(statusCode in 200..299) { "HTTP $statusCode" }
+                val expected = connection.contentLengthLong
                 connection.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
-                        checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
+                        checkNotNull(output) { "Could not open destination" }
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        var displayed = 0L
+                        while (true) {
+                            if (downloadCancelled.get()) throw CancellationException()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            partial = true
+                            output.write(buffer, 0, count)
+                            total += count
+                            if (total - displayed >= 256 * 1024 || total == expected) {
+                                displayed = total
+                                val copied = total
+                                handler.post {
+                                    if (!isDestroyed && !isFinishing && downloadDialog === dialog) {
+                                        if (expected > 0) {
+                                            progressBar.isIndeterminate = false
+                                            progressBar.max = 100
+                                            progressBar.progress = ((copied * 100L) / expected).toInt().coerceIn(0, 100)
+                                        }
+                                        progressLabel.text = getString(R.string.onboarding_download_bytes, copied)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                show(getString(R.string.saved))
+                if (downloadCancelled.get()) throw CancellationException()
+                completed = true
+            } catch (_: CancellationException) {
+                cancelled = true
             } catch (e: Exception) {
-                show(getString(R.string.download_failed, e.message ?: e.toString()))
+                Log.w("OpenCodieDownload", "Download failed (${e.javaClass.simpleName})")
+            } finally {
+                connection?.disconnect()
+                handler.post {
+                    if (downloadDialog === dialog) {
+                        downloadDialog = null
+                        dialog.dismiss()
+                    }
+                    if (!isDestroyed && !isFinishing) {
+                        val message = when {
+                            completed -> getString(R.string.saved)
+                            cancelled -> getString(R.string.onboarding_download_cancelled)
+                            partial -> getString(R.string.onboarding_download_partial)
+                            else -> getString(R.string.onboarding_download_failure)
+                        }
+                        show(message)
+                    }
+                }
+                downloadInProgress.set(false)
             }
         }.apply { isDaemon = true }.start()
     }
