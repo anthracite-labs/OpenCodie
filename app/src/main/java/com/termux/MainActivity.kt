@@ -2,7 +2,10 @@ package com.termux
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.IntentFilter
 import android.content.pm.PackageManager
@@ -30,6 +33,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
 import java.net.HttpURLConnection
@@ -46,6 +50,7 @@ import java.nio.file.LinkOption
 class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
+    private lateinit var retry: Button
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -95,6 +100,15 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.WHITE)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showDiagnostics() }
+        }
+        retry = Button(this).apply {
+            text = "Retry"
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            visibility = View.GONE
+            setOnClickListener { retryCheckNow() }
         }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -121,6 +135,14 @@ class MainActivity : Activity() {
         setContentView(FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            addView(
+                retry,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+                ).apply { bottomMargin = 48 },
+            )
         })
 
         startForegroundService(Intent(this, OpenCodeService::class.java))
@@ -428,15 +450,53 @@ class MainActivity : Activity() {
                 }
                 error != null -> {
                     status.visibility = View.VISIBLE
-                    status.text = getString(R.string.failed, error)
+                    val code = RuntimeHealth.failureCode(error)
+                    status.text = getString(R.string.failed, "[$code] $error")
                 }
                 else -> {
                     status.visibility = View.VISIBLE
                     status.text = OpenCodeHost.status
                 }
             }
+            refreshHealthPanel()
             poll()
         }, if (loadedUrl == null) POLL_MS else RECONNECT_POLL_MS)
+    }
+
+    /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */
+    private fun refreshHealthPanel() {
+        if (!::retry.isInitialized) return
+        val state = RuntimeHealth.current(OpenCodeHost.status, OpenCodeHost.error)
+        retry.visibility = if (state is HealthState.Failed) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * Immediate re-check, not a server restart: clears the consumed pairing
+     * marker so the next poll mints a fresh link at once. A dead server is
+     * still revived by the supervisor's backoff loop, not here.
+     */
+    private fun retryCheckNow() {
+        observedServerPairing = null
+        nextPairingAttemptAtMs = SystemClock.elapsedRealtime()
+        status.visibility = View.VISIBLE
+        status.text = getString(R.string.reconnecting)
+        refreshHealthPanel()
+    }
+
+    private fun showDiagnostics() {
+        val error = OpenCodeHost.error ?: return
+        val code = RuntimeHealth.failureCode(error)
+        val details = RuntimeHealth.sanitize("[$code] $error\n\n${OpenCodeHost.sanitizedLog()}")
+        AlertDialog.Builder(this)
+            .setTitle("OpenCodie diagnostics")
+            .setMessage(details.takeLast(2000))
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(ClipData.newPlainText("opencodie-diagnostics", details))
+                show("Diagnostics copied (secrets redacted)")
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun show(message: String) {
