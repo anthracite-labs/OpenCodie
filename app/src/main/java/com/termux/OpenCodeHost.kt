@@ -67,7 +67,6 @@ object OpenCodeHost {
     @Synchronized
     fun switchWorkspace(context: Context, name: String): Boolean {
         if (!ProjectHub.isValidProjectName(name)) return false
-        workspaceOverride = name
         val old = supervisor
         stop()
         var waits = 0
@@ -79,6 +78,10 @@ object OpenCodeHost {
             }
             waits++
         }
+        // Latch only after the old supervisor exits: a failed stop must not
+        // leave the next auto-restart pointed at a directory the UI never
+        // confirmed.
+        workspaceOverride = name
         start(context)
         return true
     }

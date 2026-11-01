@@ -565,7 +565,8 @@ class MainActivity : Activity() {
         } else {
             proc.inputStream.bufferedReader().use { it.readText() }
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.w("OpenCodieHub", "git unavailable for ${dir.name}", e)
         ""
     }
 
