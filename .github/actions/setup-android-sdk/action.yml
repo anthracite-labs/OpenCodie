@@ -14,6 +14,6 @@ runs:
         set -euo pipefail
         SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
         test -x "$SDKMANAGER"
-        # shellcheck disable=SC2086
-        "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install ${{ inputs.packages }}
+        read -r -a PKGS <<< "${{ inputs.packages }}"
+        "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install "${PKGS[@]}"
         test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
