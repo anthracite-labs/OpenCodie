@@ -138,6 +138,8 @@ jobs:
           packages: 'platforms;android-37.0 build-tools;37.0.0'
       - name: Run unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
+      - name: Compile Android device regression tests
+        run: ./gradlew --no-daemon :app:assembleDebugAndroidTest
       - name: Run Python release-contract tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
