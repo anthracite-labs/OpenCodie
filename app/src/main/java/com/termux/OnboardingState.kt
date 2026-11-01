@@ -9,6 +9,12 @@ package com.termux
 internal enum class SetupPhase { PREPARING, CONNECTING, FAILED }
 
 internal object OnboardingState {
+    fun canRevealWebView(onboardingCompleted: Boolean, webPageReady: Boolean): Boolean =
+        onboardingCompleted && webPageReady
+
+    fun shouldPromptForStorage(runtimeReady: Boolean, optedIn: Boolean, alreadyPrompted: Boolean): Boolean =
+        runtimeReady && optedIn && !alreadyPrompted
+
     fun phase(status: String, error: String?, pairingReady: Boolean): SetupPhase {
         if (error != null) return SetupPhase.FAILED
         if (pairingReady || status.contains("Waiting for OpenCode", ignoreCase = true) ||
