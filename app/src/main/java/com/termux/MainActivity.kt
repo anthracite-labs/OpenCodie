@@ -467,15 +467,18 @@ class MainActivity : Activity() {
     /** First run: one welcome dialog per version, after the auto storage prompt. */
     private fun maybeShowFirstRun() {
         if (!resumed || isDestroyed || isFinishing) return
+        // Cheapest check first: after the seen version is stored this is ~free
+        // on every poll tick instead of hitting filesDir and TERMUX_HOME 2x/s.
+        val prefs = getSharedPreferences(FirstRun.PREFS, MODE_PRIVATE)
+        val version = BuildConfig.VERSION_NAME
+        if (prefs.getString(FirstRun.SEEN_KEY, null) == version) return
         if (!File(filesDir, ".opencodie-ready").isFile) return
         val bootstrap = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
         if (!bootstrap.getBoolean("storage_prompted", false)) return
-        val prefs = getSharedPreferences(FirstRun.PREFS, MODE_PRIVATE)
-        val version = BuildConfig.VERSION_NAME
         if (!FirstRun.shouldShow(
                 runtimeReady = true,
                 storagePromptedBefore = true,
-                seenVersion = prefs.getString(FirstRun.SEEN_KEY, null),
+                seenVersion = null,
                 currentVersion = version,
             )
         ) return
