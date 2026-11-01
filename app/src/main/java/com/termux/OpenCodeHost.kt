@@ -269,7 +269,7 @@ object OpenCodeHost {
     fun hasValidWebSession(cookies: String): Boolean =
         verifyWebSession(cookies) == SessionValidation.VALID
 
-    fun verifyWebSession(cookies: String): SessionValidation {
+    internal fun verifyWebSession(cookies: String): SessionValidation {
         if (cookies.isBlank()) return SessionValidation.EXPIRED
         val request = (URL("http://$HOST:$PORT/api/info").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
