@@ -53,6 +53,12 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var retry: Button
+    private lateinit var onboarding: OnboardingView
+    private enum class FirstRun { WELCOME, PERMISSIONS, CONTINUE }
+    private var firstRun = FirstRun.WELCOME
+    private var webUiReady = false
+    private var webPageFailed = false
+    @Volatile private var storageSetupStarted = false
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -74,6 +80,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateWebViewFileAccess()
+        updateOnboarding()
     }
 
     override fun onPause() {
@@ -122,6 +129,9 @@ class MainActivity : Activity() {
         pendingDownload = savedInstanceState?.getString("pending_download_url")
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
+        val completed = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
+            .getBoolean("completed", false)
+        firstRun = if (completed) FirstRun.CONTINUE else FirstRun.WELCOME
         val density = resources.displayMetrics.density
         val statusPad = (16 * density).toInt()
 
@@ -171,10 +181,39 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
         ).apply { bottomMargin = (48 * density).toInt() }
+        onboarding = OnboardingView(this, object : OnboardingView.Actions {
+            override fun getStarted() {
+                firstRun = FirstRun.PERMISSIONS
+                updateOnboarding()
+            }
+            override fun requestStorage() {
+                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
+                    .putBoolean("storage_opt_in", true)
+                    .putBoolean("storage_prompted", true)
+                    .commit()
+                requestStorageAccess()
+                updateOnboarding()
+            }
+            override fun requestNotifications() {
+                requestNotificationPermission()
+                updateOnboarding()
+            }
+            override fun continueToWorkspace() {
+                getSharedPreferences("opencodie_onboarding", MODE_PRIVATE).edit()
+                    .putBoolean("completed", true).apply()
+                firstRun = FirstRun.CONTINUE
+                updateOnboarding()
+            }
+            override fun retry() = retryCheckNow()
+            override fun diagnostics() = showDiagnostics()
+        })
+        webView.visibility = View.INVISIBLE
+        status.visibility = View.GONE
         val root = FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             addView(retry, retryLp)
+            addView(onboarding, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         }
         // Recovery is the only native overlay; keep it inside system insets.
         root.setOnApplyWindowInsetsListener { _, insets ->
@@ -187,7 +226,7 @@ class MainActivity : Activity() {
         setContentView(root)
 
         startForegroundService(Intent(this, OpenCodeService::class.java))
-        requestNotificationPermission()
+        updateOnboarding()
         poll()
     }
 
@@ -214,6 +253,39 @@ class MainActivity : Activity() {
         webView.settings.allowUniversalAccessFromFileURLs = false
     }
 
+    /** Onboarding is presentation only; the existing service owns execution. */
+    private fun updateOnboarding() {
+        if (!::onboarding.isInitialized) return
+        if (OnboardingState.canRevealWebView(firstRun == FirstRun.CONTINUE, webUiReady)) {
+            onboarding.visibility = View.GONE
+            webView.visibility = View.VISIBLE
+            status.visibility = View.GONE
+            return
+        }
+        onboarding.visibility = View.VISIBLE
+        webView.visibility = View.INVISIBLE
+        status.visibility = View.GONE
+        retry.visibility = View.GONE
+        val screen = when (firstRun) {
+            FirstRun.WELCOME -> OnboardingView.Screen.WELCOME
+            FirstRun.PERMISSIONS -> OnboardingView.Screen.PERMISSIONS
+            FirstRun.CONTINUE -> when (OnboardingState.phase(
+                OpenCodeHost.status, OpenCodeHost.error, OpenCodeHost.pairingUrl != null,
+            )) {
+                SetupPhase.FAILED -> OnboardingView.Screen.FAILED
+                SetupPhase.CONNECTING -> OnboardingView.Screen.CONNECTING
+                SetupPhase.PREPARING -> OnboardingView.Screen.PREPARING
+            }
+        }
+        onboarding.show(
+            screen = screen,
+            preparationTitle = OnboardingState.preparationTitle(OpenCodeHost.status),
+            storageGranted = hasStoragePermission(),
+            notificationsGranted = Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -231,7 +303,13 @@ class MainActivity : Activity() {
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            status.visibility = View.GONE
+            if (!webPageFailed &&
+                url.startsWith("http://" + OpenCodeHost.HOST + ":" + OpenCodeHost.PORT + "/") &&
+                !url.contains("/auth/connect/")
+            ) {
+                webUiReady = true
+                updateOnboarding()
+            }
             // Persist the browser-issued session cookie before the next Activity
             // instance needs it. Do the synchronous flush off the UI thread.
             if (url.startsWith("http://${OpenCodeHost.HOST}:${OpenCodeHost.PORT}/") &&
@@ -246,6 +324,9 @@ class MainActivity : Activity() {
             if (!request.isForMainFrame) return
             status.visibility = View.VISIBLE
             status.text = getString(R.string.reconnecting)
+            webPageFailed = true
+            webUiReady = false
+            updateOnboarding()
             // An old WebView load may fail after a server restart; allow a new
             // session check without replaying any consumed pairing URL.
             observedServerPairing = null
@@ -294,11 +375,13 @@ class MainActivity : Activity() {
             }
             STORAGE_SETTINGS_REQUEST -> {
                 if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {
-                    setupStorageLinks()
+                    if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
                     updateWebViewFileAccess()
+                    updateOnboarding()
                 } else {
                     updateWebViewFileAccess()
-                    show("Storage access not granted; termux-setup-storage can be retried")
+                    updateOnboarding()
+                    show("Storage access not granted; you can allow it later")
                 }
             }
             else -> super.onActivityResult(requestCode, resultCode, data)
@@ -309,29 +392,44 @@ class MainActivity : Activity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) return
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            updateOnboarding()
+            return
+        }
         if (requestCode != STORAGE_PERMISSION_REQUEST) return
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-            setupStorageLinks()
-        } else show("Storage permission denied; termux-setup-storage can be retried")
+            if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
+        } else show("Storage permission denied; you can allow it later")
         updateWebViewFileAccess()
+        updateOnboarding()
     }
 
-    /** Bootstrap installs in the service; ask only once after its ready marker exists. */
+    /** Set up shared links only after explicit opt-in and a complete runtime install. */
     private fun maybeRequestBootstrapStorage() {
         if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return
         val preferences = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-        if (preferences.getBoolean("storage_prompted", false)) return
-        // Commit before opening Android settings so process death cannot cause prompt loops.
-        if (preferences.edit().putBoolean("storage_prompted", true).commit()) {
-            requestStorageAccess()
+        val optedIn = preferences.getBoolean("storage_opt_in", false)
+        if (!optedIn) return
+        if (OnboardingState.shouldPromptForStorage(
+            runtimeReady = true,
+            optedIn = optedIn,
+            alreadyPrompted = preferences.getBoolean("storage_prompted", false),
+        )) {
+            if (preferences.edit().putBoolean("storage_prompted", true).commit()) {
+                requestStorageAccess()
+            }
+            return
         }
+        if (hasStoragePermission() &&
+            !preferences.getBoolean("storage_links_ready", false) && !storageSetupStarted
+        ) setupStorageLinks()
     }
 
     private fun requestStorageAccess() {
         if (Build.VERSION.SDK_INT >= 30) {
             if (Environment.isExternalStorageManager()) {
-                setupStorageLinks()
+                if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
+                updateOnboarding()
                 return
             }
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
@@ -343,7 +441,7 @@ class MainActivity : Activity() {
                 show("Android storage settings unavailable")
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-            setupStorageLinks()
+            if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
         } else {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_PERMISSION_REQUEST)
         }
@@ -351,6 +449,8 @@ class MainActivity : Activity() {
 
     /** Idempotent Termux links. Never clear ~/storage or overwrite a user's files. */
     private fun setupStorageLinks() {
+        if (storageSetupStarted) return
+        storageSetupStarted = true
         Thread {
             try {
                 val storage = File(Termux.HOME, "storage")
@@ -389,10 +489,12 @@ class MainActivity : Activity() {
                         Os.symlink(target.absolutePath, link.toString())
                     }
                 }
-                show("Termux storage ready: ~/storage")
+                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE).edit()
+                    .putBoolean("storage_links_ready", true).apply()
+                show("Shared files connected")
             } catch (e: Exception) {
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
-                show("Storage setup failed: ${e.message}")
+                show("Could not connect shared files; see diagnostics if needed")
             }
         }.apply { isDaemon = true }.start()
     }
@@ -458,7 +560,10 @@ class MainActivity : Activity() {
                 }
                 destination.onSuccess { target ->
                     loadedUrl = target
+                    webUiReady = false
+                    webPageFailed = false
                     webView.loadUrl(target)
+                    updateOnboarding()
                 }.onFailure {
                     observedServerPairing = null
                     nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
@@ -503,6 +608,7 @@ class MainActivity : Activity() {
                 }
             }
             refreshHealthPanel()
+            updateOnboarding()
             poll()
         }, if (loadedUrl == null) POLL_MS else RECONNECT_POLL_MS)
     }
@@ -577,7 +683,14 @@ class MainActivity : Activity() {
 
     @Deprecated("WebView back navigation")
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        if (firstRun == FirstRun.PERMISSIONS) {
+            firstRun = FirstRun.WELCOME
+            updateOnboarding()
+        } else if (webUiReady && webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
