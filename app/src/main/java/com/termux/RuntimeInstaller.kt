@@ -78,6 +78,8 @@ object RuntimeInstaller {
         if (installed != bundled) {
             log("Upgrading OpenCode $installed -> $bundled")
             upgrade(context, prefix, files)
+            // Validate before committing the new version or deleting rollback backups.
+            verifyInstalledExecutables(prefix)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             clearUpgradeBackup(files)

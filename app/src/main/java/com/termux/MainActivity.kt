@@ -812,9 +812,8 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Immediate re-check, not a server restart: clears the consumed pairing
-     * marker so the next poll mints a fresh link at once. A dead server is
-     * still revived by the supervisor's backoff loop, not here.
+     * Retry failed startup through the supervisor; otherwise just refresh
+     * a stale WebView pairing attempt.
      */
     private fun retryCheckNow() {
         // A failed bootstrap leaves no supervisor to retry automatically.
