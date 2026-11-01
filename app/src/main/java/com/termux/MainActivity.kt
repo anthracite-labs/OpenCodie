@@ -35,6 +35,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,6 +53,9 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var retry: Button
+    private lateinit var projects: Button
+    private lateinit var progress: ProgressBar
+    private lateinit var settings: Button
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -110,6 +115,20 @@ class MainActivity : Activity() {
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
         }
+        projects = Button(this).apply {
+            text = "Projects"
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { showProjectHub() }
+        }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+        }
+        settings = Button(this).apply {
+            text = "About"
+            minimumHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { showSettings() }
+        }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -134,7 +153,20 @@ class MainActivity : Activity() {
         updateWebViewFileAccess()
         setContentView(FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            // Status text above its progress bar: stacked, never overlapping.
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+                    addView(
+                        progress,
+                        LayoutParams.MATCH_PARENT,
+                        LayoutParams.WRAP_CONTENT,
+                    )
+                },
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT,
+            )
             addView(
                 retry,
                 FrameLayout.LayoutParams(
@@ -142,6 +174,22 @@ class MainActivity : Activity() {
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
                 ).apply { bottomMargin = 48 },
+            )
+            addView(
+                projects,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.END,
+                ).apply { topMargin = 16; marginEnd = 16 },
+            )
+            addView(
+                settings,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.START,
+                ).apply { topMargin = 16; marginStart = 16 },
             )
         })
 
@@ -368,24 +416,86 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Streams the loopback response with progress; dialog offers Open on success. */
     private fun save(url: String, destination: Uri) {
-        show(getString(R.string.saving))
+        val fullName = URLUtil.guessFileName(url, null, null)
+        val label = FileTransfer.fileLabel(fullName)
+        show(FileTransfer.progressText(0, -1))
+        handler.post {
+            progress.isIndeterminate = true
+            progress.visibility = View.VISIBLE
+        }
         Thread {
             try {
                 val connection = URL(url).openConnection() as HttpURLConnection
                 CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
                 connection.connectTimeout = 10_000
+                val total = connection.contentLengthLong
+                var bytes = 0L
+                var lastPostMs = 0L
                 connection.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
                         checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
+                        val buf = ByteArray(8192)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            output.write(buf, 0, n)
+                            bytes += n
+                            // Coalesce UI posts: fast loopback can copy thousands
+                            // of chunks; the shade only needs ~5 updates/sec.
+                            val nowMs = SystemClock.elapsedRealtime()
+                            if (nowMs - lastPostMs >= 200) {
+                                lastPostMs = nowMs
+                                val snapshot = bytes
+                                handler.post {
+                                    if (total > 0) {
+                                        progress.isIndeterminate = false
+                                        progress.progress = (snapshot * 100 / total).coerceIn(0, 100).toInt()
+                                    }
+                                    status.text = FileTransfer.progressText(snapshot, total)
+                                }
+                            }
+                        }
                     }
                 }
-                show(getString(R.string.saved))
+                handler.post {
+                    progress.visibility = View.GONE
+                    showSavedDialog(fullName, label, destination)
+                }
             } catch (e: Exception) {
+                handler.post { progress.visibility = View.GONE }
                 show(getString(R.string.download_failed, e.message ?: e.toString()))
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /** Full filename in the message; truncated chip only on the status line. */
+    private fun showSavedDialog(fullName: String, label: String, destination: Uri) {
+        show(getString(R.string.saved) + ": " + label)
+        // Backgrounded download: toast is enough, don't pop a dialog over
+        // whatever the user is doing now.
+        if (isDestroyed || isFinishing || !resumed) return
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.saved))
+            .setMessage(fullName)
+            .setPositiveButton("Open") { _, _ -> openSaved(destination) }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun openSaved(destination: Uri) {
+        try {
+            val type = contentResolver.getType(destination) ?: "*/*"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(destination, type)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.w("OpenCodieSave", "cannot open saved file", e)
+            show("No app can open this file")
+        }
     }
 
     /**
@@ -501,6 +611,102 @@ class MainActivity : Activity() {
             .setPositiveButton("Continue", null)
             .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
             .setOnDismissListener { markSeen() }
+            .show()
+    }
+
+    /** Project Hub: recent projects with Git branch/dirty badges + validated switch. */
+    private fun showProjectHub() {
+        Thread {
+            val dir = File(Termux.HOME, "projects")
+            val names = dir.list()
+                ?.filter { File(dir, it).isDirectory && ProjectHub.isValidProjectName(it) }
+                ?: emptyList()
+            val current = OpenCodeHost.currentWorkspaceName()
+            val ordered = ProjectHub.sortForDisplay(names, current)
+            val labels = ordered.map { name ->
+                val mark = if (name == current) "● " else ""
+                mark + name + gitSuffix(File(dir, name))
+            }
+            handler.post {
+                if (isDestroyed || isFinishing) return@post
+                if (ordered.isEmpty()) {
+                    show("No projects yet — create one under ~/projects in the WebUI")
+                    return@post
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Projects (current: $current)")
+                    .setItems(labels.toTypedArray()) { _, which ->
+                        switchProject(ordered[which])
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    private fun gitSuffix(dir: File): String = runCatching {
+        val branch = runGit(dir, "branch", "--show-current").let(ProjectHub::parseBranch)
+            ?: return ""
+        val dirty = runGit(dir, "status", "--porcelain").isNotBlank()
+        " ($branch${if (dirty) " ●" else ""})"
+    }.getOrDefault("")
+
+    private fun runGit(dir: File, vararg args: String): String = try {
+        val proc = ProcessBuilder(listOf("${Termux.PREFIX}/bin/git", "-C", dir.path) + args)
+            .redirectErrorStream(true)
+            .start()
+        if (!proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+            proc.destroyForcibly()
+            ""
+        } else {
+            proc.inputStream.bufferedReader().use { it.readText() }
+        }
+    } catch (e: Exception) {
+        Log.w("OpenCodieHub", "git unavailable for ${dir.name}", e)
+        ""
+    }
+
+    private fun switchProject(name: String) {
+        show("Switching to $name…")
+        Thread {
+            val ok = OpenCodeHost.switchWorkspace(applicationContext, name)
+            handler.post {
+                if (ok) {
+                    // A new server mints fresh pairing links; never reuse the old session.
+                    observedServerPairing = null
+                    loadedUrl = null
+                    show("Switched to $name")
+                } else {
+                    show("Invalid project name: $name")
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** Settings & About: version, server, workspace, storage + actions. */
+    private fun showSettings() {
+        val lines = AppSettings.summaryLines(
+            SettingsState(
+                appVersion = BuildConfig.VERSION_NAME,
+                serverStatus = OpenCodeHost.status,
+                serverError = OpenCodeHost.error,
+                workspacePath = File(Termux.HOME, "projects/" + OpenCodeHost.currentWorkspaceName()).path,
+                storageGranted = hasStoragePermission(),
+            ),
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage(lines.joinToString("\n"))
+            .setPositiveButton("Restart server") { dialog, _ ->
+                // Dismiss first: the status overlay owns restart progress from here.
+                dialog.dismiss()
+                Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
+                show(getString(R.string.reconnecting))
+            }
+            .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
+            .setNegativeButton("Licenses") { _, _ ->
+                openExternally(Uri.parse(AppSettings.SOURCE_URL))
+            }
             .show()
     }
 

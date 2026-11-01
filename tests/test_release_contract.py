@@ -102,9 +102,14 @@ class BuildContractTest(unittest.TestCase):
     def test_git_installed_with_bootstrap_and_safe_workspace(self):
         lock = (ROOT / "runtime.lock").read_text()
         host = (ROOT / "app/src/main/java/com/termux/OpenCodeHost.kt").read_text()
+        hub = (ROOT / "app/src/main/java/com/termux/ProjectHub.kt").read_text()
         self.assertIn("TERMUX_BOOTSTRAP_PACKAGES=ripgrep,libc++,git", lock)
         self.assertIn(".directory(workspace)", host)
-        self.assertIn('File(Termux.HOME, "projects/workspace")', host)
+        # The default workspace path is hardcoded (safe); validated overrides
+        # in ProjectHub fall back to it. It lives in ProjectHub, not the host.
+        self.assertIn('"projects/workspace"', hub + host)
+        self.assertIn("fun defaultWorkspace(", hub)
+        self.assertIn("workspaceDir(", host)
         installer = (ROOT / "app/src/main/java/com/termux/RuntimeInstaller.kt").read_text()
         self.assertIn("selectDefaultMirror(prefix)", installer)
         self.assertIn('"etc/termux/chosen_mirrors"', installer)
