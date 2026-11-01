@@ -35,7 +35,7 @@ class OpenCodeService : Service() {
 
     private fun notification(): Notification {
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "OpenCode server", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, getString(R.string.onboarding_notification_channel), NotificationManager.IMPORTANCE_LOW),
         )
         val open = PendingIntent.getActivity(
             this,
@@ -45,7 +45,7 @@ class OpenCodeService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("OpenCode server running")
+            .setContentText(getString(R.string.onboarding_server_running))
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentIntent(open)
             .setOngoing(true)
