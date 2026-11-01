@@ -360,8 +360,10 @@ class MainActivity : Activity() {
     /** Onboarding is presentation only; the existing service owns execution. */
     private fun updateOnboarding() {
         if (!::onboarding.isInitialized) return
+        val startupSnapshot = OpenCodeHost.startup.snapshot()
         val hostReady = OpenCodeHost.error == null &&
-            OpenCodeHost.status == "Ready" && OpenCodeHost.pairingUrl != null
+            startupSnapshot.active in listOf(StartupStep.WEBVIEW, StartupStep.READY) &&
+            OpenCodeHost.pairingUrl != null
         if (OnboardingState.canRevealWebView(
             firstRun == FirstRun.CONTINUE, webUiReady, hostReady, OpenCodeHost.error != null,
         )) {
@@ -374,7 +376,6 @@ class MainActivity : Activity() {
         webView.visibility = View.INVISIBLE
         status.visibility = View.GONE
         retry.visibility = View.GONE
-        val startupSnapshot = OpenCodeHost.startup.snapshot()
         val screen = when (firstRun) {
             FirstRun.WELCOME -> OnboardingView.Screen.WELCOME
             FirstRun.PERMISSIONS -> OnboardingView.Screen.PERMISSIONS
