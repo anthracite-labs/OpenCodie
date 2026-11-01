@@ -35,6 +35,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
@@ -140,14 +141,19 @@ class MainActivity : Activity() {
         updateWebViewFileAccess()
         setContentView(FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            // Status text above its progress bar: stacked, never overlapping.
             addView(
-                progress,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP or Gravity.CENTER_HORIZONTAL,
-                ),
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+                    addView(
+                        progress,
+                        LayoutParams.MATCH_PARENT,
+                        LayoutParams.WRAP_CONTENT,
+                    )
+                },
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT,
             )
             addView(
                 retry,
@@ -398,6 +404,7 @@ class MainActivity : Activity() {
                 connection.connectTimeout = 10_000
                 val total = connection.contentLengthLong
                 var bytes = 0L
+                var lastPostMs = 0L
                 connection.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
                         checkNotNull(output) { "Could not open $destination" }
@@ -407,13 +414,19 @@ class MainActivity : Activity() {
                             if (n < 0) break
                             output.write(buf, 0, n)
                             bytes += n
-                            val snapshot = bytes
-                            handler.post {
-                                if (total > 0) {
-                                    progress.isIndeterminate = false
-                                    progress.progress = (snapshot * 100 / total).coerceIn(0, 100).toInt()
+                            // Coalesce UI posts: fast loopback can copy thousands
+                            // of chunks; the shade only needs ~5 updates/sec.
+                            val nowMs = SystemClock.elapsedRealtime()
+                            if (nowMs - lastPostMs >= 200) {
+                                lastPostMs = nowMs
+                                val snapshot = bytes
+                                handler.post {
+                                    if (total > 0) {
+                                        progress.isIndeterminate = false
+                                        progress.progress = (snapshot * 100 / total).coerceIn(0, 100).toInt()
+                                    }
+                                    status.text = FileTransfer.progressText(snapshot, total)
                                 }
-                                status.text = FileTransfer.progressText(snapshot, total)
                             }
                         }
                     }
@@ -432,7 +445,9 @@ class MainActivity : Activity() {
     /** Full filename in the message; truncated chip only on the status line. */
     private fun showSavedDialog(fullName: String, label: String, destination: Uri) {
         show(getString(R.string.saved) + ": " + label)
-        if (isDestroyed || isFinishing) return
+        // Backgrounded download: toast is enough, don't pop a dialog over
+        // whatever the user is doing now.
+        if (isDestroyed || isFinishing || !resumed) return
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.saved))
             .setMessage(fullName)
@@ -449,7 +464,8 @@ class MainActivity : Activity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
+        } catch (e: Exception) {
+            Log.w("OpenCodieSave", "cannot open saved file", e)
             show("No app can open this file")
         }
     }

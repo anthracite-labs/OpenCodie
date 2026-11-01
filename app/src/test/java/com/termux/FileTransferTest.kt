@@ -28,4 +28,10 @@ class FileTransferTest {
         assertTrue(label.contains("…"))
         assertTrue(label.length <= 36)
     }
+
+    @Test
+    fun giantExtensionDegradesGracefully() {
+        val label = FileTransfer.fileLabel("x." + "y".repeat(40))
+        assertEquals(32, label.length)
+    }
 }
