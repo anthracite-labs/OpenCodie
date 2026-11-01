@@ -21,6 +21,9 @@ internal data class StartupSnapshot(
     val active: StartupStep,
     val completedCount: Int,
     val failed: Boolean = false,
+    val retrying: Boolean = false,
+    /** Safe, preclassified reason without exception text, passwords or pairing links. */
+    val lastFailure: String? = null,
     val percent: Int? = null,
 )
 
@@ -28,11 +31,18 @@ internal data class StartupSnapshot(
 internal class StartupTimeline {
     @Volatile private var event: StartupEvent = StartupEvent.PREPARING_RUNTIME
     @Volatile private var failure: Boolean = false
+    @Volatile private var retryingServer = false
+    @Volatile private var lastFailureReason: String? = null
 
     @Synchronized fun advance(next: StartupEvent) {
         if (next.ordinal >= event.ordinal) {
             event = next
             failure = false
+            // Only verified server readiness clears "retrying": starting
+            // another process is not evidence the recovery succeeded.
+            if (next == StartupEvent.SERVER_READY || next == StartupEvent.WEBVIEW_READY) {
+                retryingServer = false
+            }
         }
     }
 
@@ -44,14 +54,31 @@ internal class StartupTimeline {
         }
     }
 
-    @Synchronized fun fail() { failure = true }
+    @Synchronized fun noteServerFailure(reason: String) {
+        // Known, controlled stage text only; never pass through exception details.
+        lastFailureReason = reason
+        retryingServer = true
+        failure = false
+        if (event.ordinal >= StartupEvent.RUNTIME_READY.ordinal) {
+            event = StartupEvent.STARTING_SERVER
+        }
+    }
+
+    @Synchronized fun fail() {
+        failure = true
+        retryingServer = false
+    }
 
     @Synchronized fun reset() {
         event = StartupEvent.PREPARING_RUNTIME
         failure = false
+        retryingServer = false
+        lastFailureReason = null
     }
 
-    @Synchronized fun snapshot(): StartupSnapshot = describe(event).copy(failed = failure)
+    @Synchronized fun snapshot(): StartupSnapshot = describe(event).copy(
+        failed = failure, retrying = retryingServer, lastFailure = lastFailureReason,
+    )
 
     companion object {
         fun describe(event: StartupEvent): StartupSnapshot {
