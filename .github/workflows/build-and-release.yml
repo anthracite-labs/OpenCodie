@@ -300,6 +300,16 @@ jobs:
             echo "::error::APK size $bytes exceeds budget $max_bytes bytes"
             exit 1
           fi
+      # Debug-signed test APK only. Never publish it as a production release.
+      # Runs after the same size and runtime checks as release builds.
+      - name: Upload PR debug APK for device acceptance
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenCodie-PR${{ github.event.pull_request.number }}-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Prepare single signed APK
         if: github.event_name != 'pull_request'
         run: |
