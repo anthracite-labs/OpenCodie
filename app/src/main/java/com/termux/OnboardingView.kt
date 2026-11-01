@@ -45,6 +45,9 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         val notificationsGranted: Boolean,
         val notificationsAttempted: Boolean,
         val failureMessage: String?,
+        val storagePending: Boolean,
+        val notificationsPending: Boolean,
+        val startup: StartupSnapshot,
     )
 
     private val backgroundColor get() = context.getColor(R.color.onboarding_background)
@@ -62,6 +65,10 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     private var description: TextView? = null
     private var storageButton: Button? = null
     private var notificationsButton: Button? = null
+    private var storageStatus: TextView? = null
+    private var notificationStatus: TextView? = null
+    private var startupDetail: TextView? = null
+    private var startupRows: List<TextView> = emptyList()
     private var noticeView: TextView? = null
     private var latestNotice: String? = null
 
@@ -77,7 +84,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         lastPresentation?.let {
             show(it.screen, it.title, it.storageGranted, it.storageLinksReady,
                 it.storageSetupFailed, it.storageAttempted, it.notificationsGranted,
-                it.notificationsAttempted, it.failureMessage)
+                it.notificationsAttempted, it.failureMessage, it.storagePending,
+                it.notificationsPending, it.startup)
         }
     }
 
@@ -106,10 +114,13 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         notificationsGranted: Boolean = false,
         notificationsAttempted: Boolean = false,
         failureMessage: String? = null,
+        storagePending: Boolean = false,
+        notificationsPending: Boolean = false,
+        startup: StartupSnapshot = StartupTimeline.describe(StartupEvent.PREPARING_RUNTIME),
     ) {
         val presentation = Presentation(screen, preparationTitle, storageGranted,
             storageLinksReady, storageSetupFailed, storageAttempted, notificationsGranted,
-            notificationsAttempted, failureMessage)
+            notificationsAttempted, failureMessage, storagePending, notificationsPending, startup)
         lastPresentation = presentation
         if (previousScreen == screen) {
             refreshDynamic(presentation)
@@ -122,6 +133,10 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         description = null
         storageButton = null
         notificationsButton = null
+        storageStatus = null
+        notificationStatus = null
+        startupDetail = null
+        startupRows = emptyList()
         noticeView = null
 
         val scroll = ScrollView(context).apply {
@@ -149,9 +164,14 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             else -> R.string.onboarding_workspace_tag
         }), TypeRole.CAPTION, secondaryColor, true))
         column.addView(header)
-        space(column, 32)
-        column.addView(mark(dp(80)), LinearLayout.LayoutParams(dp(80), dp(80)))
-        space(column, 28)
+        if (screen == Screen.PREPARING || screen == Screen.CONNECTING) {
+            // Give real progress the space previously occupied by the duplicate logo.
+            space(column, 28)
+        } else {
+            space(column, 32)
+            column.addView(mark(dp(80)), LinearLayout.LayoutParams(dp(80), dp(80)))
+            space(column, 28)
+        }
 
         headline = text(titleFor(presentation), TypeRole.HERO, titleColor, true).apply {
             isAccessibilityHeading = true
@@ -178,36 +198,50 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         when (screen) {
             Screen.PERMISSIONS -> {
                 space(column, 18)
-                storageButton = permissionItem(column,
+                val storage = permissionItem(column,
                     context.getString(R.string.onboarding_storage_title),
                     context.getString(R.string.onboarding_storage_description),
                     actions::requestStorage)
+                storageButton = storage.second
+                storageStatus = storage.first
                 space(column, 12)
-                notificationsButton = permissionItem(column,
+                val notifications = permissionItem(column,
                     context.getString(R.string.onboarding_notification_title),
                     context.getString(R.string.onboarding_notification_description),
                     actions::requestNotifications)
+                notificationsButton = notifications.second
+                notificationStatus = notifications.first
             }
             Screen.PREPARING, Screen.CONNECTING -> {
                 space(column, 22)
                 val state = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                    orientation = LinearLayout.VERTICAL
                     background = rounded(surfaceColor, dp(16), borderColor)
                     setPadding(dp(18), dp(18), dp(18), dp(18))
                 }
-                val spinner = ProgressBar(context, null, android.R.attr.progressBarStyleSmall).apply {
+                startupDetail = text("", TypeRole.LABEL, titleColor, true).apply {
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }.also { state.addView(it) }
+                space(state, 12)
+                val activityIndicator = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
                     isIndeterminate = true
                     indeterminateTintList = ColorStateList.valueOf(accentColor)
                     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
-                state.addView(spinner, LinearLayout.LayoutParams(dp(26), dp(26)))
-                state.addView(text(context.getString(
-                    if (screen == Screen.CONNECTING) R.string.onboarding_connecting_progress
-                    else R.string.onboarding_preparing_progress,
-                ), TypeRole.LABEL, titleColor, true).apply {
-                    setPaddingRelative(dp(14), 0, 0, 0)
-                })
+                state.addView(activityIndicator, LinearLayout.LayoutParams(-1, dp(4)))
+                space(state, 20)
+                val labels = listOf(
+                    R.string.onboarding_step_runtime,
+                    R.string.onboarding_step_packages,
+                    R.string.onboarding_step_server,
+                    R.string.onboarding_step_workspace,
+                )
+                startupRows = labels.map { label ->
+                    text(context.getString(label), TypeRole.LABEL, secondaryColor).also {
+                        state.addView(it)
+                        space(state, 14)
+                    }
+                }
                 column.addView(state)
             }
             else -> Unit
@@ -253,27 +287,69 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     })
 
     private fun refreshDynamic(p: Presentation) {
-        headline?.text = titleFor(p)
-        description?.text = descriptionFor(p)
-        storageButton?.apply {
-            text = context.getString(when (PermissionFlow.button(p.storageGranted, p.storageAttempted)) {
-                PermissionButton.ALLOWED -> R.string.onboarding_allowed
-                PermissionButton.NOT_ALLOWED -> R.string.onboarding_not_allowed
-                PermissionButton.GRANT -> R.string.onboarding_grant_access
+        val newTitle = titleFor(p)
+        val newDescription = descriptionFor(p)
+        if (headline?.text != newTitle) headline?.text = newTitle
+        if (description?.text != newDescription) description?.text = newDescription
+
+        fun label(granted: Boolean, attempted: Boolean, pending: Boolean): String =
+            context.getString(when {
+                pending -> R.string.onboarding_requesting
+                granted -> R.string.onboarding_allowed
+                attempted -> R.string.onboarding_not_enabled
+                else -> R.string.onboarding_not_configured
             })
-            isEnabled = !p.storageGranted || p.storageSetupFailed
-            contentDescription = context.getString(R.string.onboarding_storage_action, text)
+
+        fun updatePermission(
+            statusView: TextView?, button: Button?, granted: Boolean,
+            attempted: Boolean, pending: Boolean, retrySetup: Boolean = false,
+        ) {
+            val status = label(granted, attempted, pending)
+            if (statusView?.text != status) statusView?.text = status
+            button?.apply {
+                val nextLabel = context.getString(when {
+                    pending -> R.string.onboarding_requesting
+                    retrySetup -> R.string.onboarding_retry_setup
+                    granted -> R.string.onboarding_change_access
+                    else -> R.string.onboarding_grant_access
+                })
+                if (text != nextLabel) text = nextLabel
+                isEnabled = !pending
+            }
         }
-        notificationsButton?.apply {
-            text = context.getString(when (PermissionFlow.button(
-                p.notificationsGranted, p.notificationsAttempted,
-            )) {
-                PermissionButton.ALLOWED -> R.string.onboarding_allowed
-                PermissionButton.NOT_ALLOWED -> R.string.onboarding_not_allowed
-                PermissionButton.GRANT -> R.string.onboarding_grant_access
+        updatePermission(storageStatus, storageButton, p.storageGranted, p.storageAttempted,
+            p.storagePending, p.storageGranted && p.storageSetupFailed)
+        updatePermission(notificationStatus, notificationsButton, p.notificationsGranted,
+            p.notificationsAttempted, p.notificationsPending)
+
+        val detail = context.getString(when (p.startup.event) {
+            StartupEvent.PREPARING_RUNTIME -> R.string.onboarding_stage_preparing
+            StartupEvent.VERIFYING_RUNTIME -> R.string.onboarding_stage_verifying
+            StartupEvent.UNPACKING_RUNTIME -> R.string.onboarding_stage_unpacking
+            StartupEvent.CONFIGURING_PACKAGES -> R.string.onboarding_stage_packages
+            StartupEvent.VERIFYING_INSTALL -> R.string.onboarding_stage_checking
+            StartupEvent.RUNTIME_READY, StartupEvent.STARTING_SERVER -> R.string.onboarding_stage_server
+            StartupEvent.WAITING_FOR_SERVER -> R.string.onboarding_stage_waiting
+            StartupEvent.SERVER_READY -> R.string.onboarding_stage_connecting
+            StartupEvent.WEBVIEW_READY -> R.string.onboarding_stage_ready
+        })
+        if (startupDetail?.text != detail) startupDetail?.text = detail
+        startupRows.forEachIndexed { index, row ->
+            val label = context.getString(when (index) {
+                0 -> R.string.onboarding_step_runtime
+                1 -> R.string.onboarding_step_packages
+                2 -> R.string.onboarding_step_server
+                else -> R.string.onboarding_step_workspace
             })
-            isEnabled = !p.notificationsGranted
-            contentDescription = context.getString(R.string.onboarding_notifications_action, text)
+            val glyph = when {
+                index < p.startup.completedCount -> "✓"
+                index == p.startup.completedCount && !p.startup.failed -> "●"
+                index == p.startup.completedCount -> "!"
+                else -> "○"
+            }
+            val value = "$glyph  $label"
+            if (row.text != value) row.text = value
+            row.setTextColor(if (index == p.startup.completedCount) accentColor else secondaryColor)
         }
     }
 
@@ -282,7 +358,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         title: String,
         description: String,
         action: () -> Unit,
-    ): Button {
+    ): Pair<TextView, Button> {
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(surfaceColor, dp(16), borderColor)
@@ -306,10 +382,14 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         }
         row.addView(control)
         box.addView(row)
+        space(box, 8)
+        val status = text(context.getString(R.string.onboarding_not_configured),
+            TypeRole.SUPPORT, accentColor, true)
+        box.addView(status)
         space(box, 4)
         box.addView(text(description, TypeRole.SUPPORT, secondaryColor))
         parent.addView(box)
-        return control
+        return status to control
     }
 
     private fun mark(size: Int): View = TextView(context).apply {
