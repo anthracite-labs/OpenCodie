@@ -80,8 +80,8 @@ class BuildContractTest(unittest.TestCase):
         activity = read("app/src/main/java/com/termux/MainActivity.kt")
         self.assertRegex(
             activity,
-            r'if \\(Build\\.VERSION\\.SDK_INT >= Build\\.VERSION_CODES\\.Q\\) \\{\\s*'
-            r'links\\["audiobooks"\\] = Environment\\.getExternalStoragePublicDirectory\\(Environment\\.DIRECTORY_AUDIOBOOKS\\)',
+            r'if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.Q\) \{\s*'
+            r'links\["audiobooks"\] = Environment\.getExternalStoragePublicDirectory\(Environment\.DIRECTORY_AUDIOBOOKS\)',
         )
 
     def test_termux_setup_storage_bridge(self):
