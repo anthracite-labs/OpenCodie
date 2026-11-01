@@ -146,6 +146,17 @@ class MainActivity : Activity() {
         }
         val completed = onboardingPrefs.getBoolean("completed", false)
         val permissionPrefs = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+        // Upgrades had no permission snapshot: seed from the actual current
+        // grants rather than treating every existing user as a new denial.
+        if (completed && !permissionPrefs.contains("storage_at_continue")) {
+            val storageAllowed = hasStoragePermission()
+            val notificationsAllowed = hasNotificationAccess()
+            permissionPrefs.edit()
+                .putBoolean("storage_at_continue", storageAllowed)
+                .putBoolean("notifications_at_continue", notificationsAllowed)
+                .putBoolean("notifications_attempted", notificationsAllowed)
+                .commit()
+        }
         val reviewRevoked = PermissionFlow.shouldReviewRevocation(
             completed = completed,
             previousStorage = permissionPrefs.getBoolean("storage_at_continue", false),
@@ -367,13 +378,30 @@ class MainActivity : Activity() {
     private fun reviewRevokedPermissions() {
         if (!::onboarding.isInitialized || firstRun != FirstRun.CONTINUE) return
         val prefs = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+        val storageNow = hasStoragePermission()
+        val notificationsNow = hasNotificationAccess()
+        val storageWasAllowed = prefs.getBoolean("storage_at_continue", false)
+        val notificationsWereAllowed = prefs.getBoolean("notifications_at_continue", false)
         if (PermissionFlow.shouldReviewRevocation(
             completed = true,
-            previousStorage = prefs.getBoolean("storage_at_continue", false),
-            storageNow = hasStoragePermission(),
-            previousNotifications = prefs.getBoolean("notifications_at_continue", false),
-            notificationsNow = hasNotificationAccess(),
-        )) firstRun = FirstRun.PERMISSIONS
+            previousStorage = storageWasAllowed,
+            storageNow = storageNow,
+            previousNotifications = notificationsWereAllowed,
+            notificationsNow = notificationsNow,
+        )) {
+            firstRun = FirstRun.PERMISSIONS
+        } else if ((storageNow && !storageWasAllowed) ||
+            (notificationsNow && !notificationsWereAllowed)
+        ) {
+            // Capture grants changed outside the app, so later revocation can
+            // be offered for review on a warm resume as well as a cold launch.
+            prefs.edit()
+                .putBoolean("storage_at_continue", storageNow)
+                .putBoolean("notifications_at_continue", notificationsNow)
+                .putBoolean("notifications_attempted",
+                    notificationsNow || prefs.getBoolean("notifications_attempted", false))
+                .apply()
+        }
     }
 
     private fun requestNotificationPermission() {
