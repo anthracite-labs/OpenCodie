@@ -21,6 +21,9 @@ import org.json.JSONObject
  * The installed-version marker is written last, so an interrupted first launch or
  * a failed package configuration never looks like a completed installation.
  */
+/** Signals a real bounded package-install timeout, not elapsed-time guesswork. */
+internal class RuntimeSetupTimedOut(message: String) : IllegalStateException(message)
+
 object RuntimeInstaller {
     private const val ZIP = "runtime-aarch64.zip"
     private const val VERSION_ASSET = "runtime.version"
@@ -37,7 +40,12 @@ object RuntimeInstaller {
     private const val READY_FILE = ".opencodie-ready"
     private const val INSTALLING_FILE = ".opencodie-installing"
 
-    fun installIfNeeded(context: Context, log: (String) -> Unit) {
+    internal fun installIfNeeded(
+        context: Context,
+        log: (String) -> Unit,
+        onStage: (StartupEvent) -> Unit = {},
+    ) {
+        onStage(StartupEvent.VERIFYING_RUNTIME)
         val files = context.filesDir
         val prefix = File(files, "usr")
         val staging = File(files, "usr-staging")
@@ -59,15 +67,19 @@ object RuntimeInstaller {
                 if (prefix.exists()) check(prefix.delete()) { "Could not clear empty prefix" }
             }
             installing.writeText("$bundled\n")
+            onStage(StartupEvent.UNPACKING_RUNTIME)
             bootstrap(context, prefix, staging, log)
             ensureDirectories(prefix)
             selectDefaultMirror(prefix)
+            onStage(StartupEvent.CONFIGURING_PACKAGES)
             runSecondStage(prefix, log)
             writeOpenCodeConfig(log)
+            onStage(StartupEvent.VERIFYING_INSTALL)
             verifyInstalledExecutables(prefix)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
+            onStage(StartupEvent.RUNTIME_READY)
             log("Termux runtime $bundled ready")
             return
         }
@@ -77,6 +89,7 @@ object RuntimeInstaller {
         recoverUpgrade(files, prefix, installed == bundled, log)
         if (installed != bundled) {
             log("Upgrading OpenCode $installed -> $bundled")
+            onStage(StartupEvent.UNPACKING_RUNTIME)
             upgrade(context, prefix, files)
             // Validate before committing the new version or deleting rollback backups.
             verifyInstalledExecutables(prefix)
@@ -86,7 +99,9 @@ object RuntimeInstaller {
         }
         ensureDirectories(prefix)
         writeOpenCodeConfig(log)
+        onStage(StartupEvent.VERIFYING_INSTALL)
         verifyInstalledExecutables(prefix)
+        onStage(StartupEvent.RUNTIME_READY)
         log("Runtime $bundled ready")
     }
 
@@ -320,9 +335,9 @@ object RuntimeInstaller {
                 } else {
                     ""
                 }
-                check(false) {
+                throw RuntimeSetupTimedOut(
                     "Termux bootstrap second stage timed out after $SECOND_STAGE_TIMEOUT_MS ms.$stuck$leaked\n${result.tail}"
-                }
+                )
             }
             is SecondStageResult.Interrupted ->
                 throw IllegalStateException("Termux bootstrap second stage interrupted\n${result.tail}")

@@ -18,6 +18,9 @@ import java.security.SecureRandom
  * One supervisor thread owns the process: it starts the server, publishes a
  * pairing link when ready, and restarts the server with backoff if it exits.
  */
+/** Raised only after the existing bounded local server readiness probe expires. */
+internal class OpenCodeReadinessTimedOut(message: String) : IllegalStateException(message)
+
 object OpenCodeHost {
     const val HOST = "127.0.0.1"
     const val PORT = 4096
@@ -27,6 +30,7 @@ object OpenCodeHost {
     private const val READY_TIMEOUT_MS = 180_000L
     private const val LOG_LIMIT = 8_000
 
+    internal val startup = StartupTimeline()
     @Volatile var status = "Starting"
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
@@ -131,10 +135,16 @@ object OpenCodeHost {
         }
     }
     private fun supervise(context: Context) {
+        startup.reset()
         try {
-            RuntimeInstaller.installIfNeeded(context) { status = RuntimeHealth.installStatus(it) }
+            RuntimeInstaller.installIfNeeded(
+                context,
+                log = { status = RuntimeHealth.installStatus(it) },
+                onStage = { startup.advance(it) },
+            )
         } catch (e: Exception) {
-            fail("Could not prepare the Termux runtime", e)
+            fail(if (e is RuntimeSetupTimedOut) "Termux package setup timed out"
+                else "Could not prepare the Termux runtime", e)
             return
         }
 
@@ -142,21 +152,35 @@ object OpenCodeHost {
         while (!stopping) {
             var started: Process? = null
             try {
+                startup.restartServer()
                 status = "Starting OpenCode"
                 error = null
                 pairingUrl = null
                 started = launch(context)
                 process = started
+                startup.advance(StartupEvent.WAITING_FOR_SERVER)
                 status = "Waiting for OpenCode"
                 pairingUrl = awaitPairing(started)
+                startup.advance(StartupEvent.SERVER_READY)
                 status = "Ready"
                 backoff = 2_000L
                 val code = started.waitFor()
                 if (stopping) break
                 Log.w(TAG, "OpenCode exited with $code")
-                status = "OpenCode stopped (exit $code), restarting"
+                status = "Retrying OpenCode server"
+                startup.noteServerFailure("OpenCode server exited (code $code)")
             } catch (e: Exception) {
-                if (!stopping) fail("OpenCode stopped", e)
+                if (!stopping) {
+                    // Server failures are recoverable: the supervisor retries
+                    // automatically. Do not flash the fatal FAILED screen.
+                    val reason = if (e is OpenCodeReadinessTimedOut)
+                        "OpenCode server readiness timed out"
+                    else "OpenCode server stopped unexpectedly"
+                    Log.w(TAG, "$reason (${e.javaClass.simpleName})")
+                    startup.noteServerFailure(reason)
+                    status = "Retrying OpenCode server"
+                    error = null
+                }
             } finally {
                 // A failed readiness/pairing attempt must not leave a server
                 // holding the loopback port when the supervisor retries.
@@ -224,7 +248,7 @@ object OpenCodeHost {
             // 500ms for ~10s, then 1s to cut wakeups during slow bootstrap.
             Thread.sleep(if (attempts < 20) 500 else 1_000)
         }
-        throw IllegalStateException("OpenCode did not become ready:\n${log()}")
+        throw OpenCodeReadinessTimedOut("OpenCode did not become ready:\n${log()}")
     }
 
     /**
@@ -308,6 +332,7 @@ object OpenCodeHost {
         // Public status and notifications must never include exception data.
         Log.e(TAG, "$message (${e.javaClass.simpleName})")
         status = message
+        startup.fail()
         error = "$message (${e.javaClass.simpleName})"
     }
 
