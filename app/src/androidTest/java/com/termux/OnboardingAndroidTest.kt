@@ -116,7 +116,10 @@ class OnboardingAndroidTest {
                 button.performClick()
                 // Synchronous assertion BEFORE Android handles the dialog.
                 assertEquals(activity.getString(R.string.onboarding_requesting), label.text.toString())
-                assertEquals(false, button.isEnabled)
+                // Cancel is an escape when a legacy Android build shows no
+                // channel-created dialog; pressing it must not open a new one.
+                assertEquals(activity.getString(R.string.onboarding_cancel_request), button.text.toString())
+                assertEquals(true, button.isEnabled)
             }
             val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             assumeTrue("Requires the Android 13+ first-install notification prompt",
