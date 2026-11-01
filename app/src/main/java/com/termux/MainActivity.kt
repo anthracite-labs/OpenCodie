@@ -361,7 +361,7 @@ class MainActivity : Activity() {
         settings.databaseEnabled = true
         settings.mediaPlaybackRequiresUserGesture = false
         settings.allowFileAccess = false
-        settings.allowContentAccess = true
+        settings.allowContentAccess = false
         settings.allowFileAccessFromFileURLs = false
         settings.allowUniversalAccessFromFileURLs = false
         settings.safeBrowsingEnabled = true
@@ -648,6 +648,7 @@ class MainActivity : Activity() {
             webUiReady = false
             disposeWebView(view, rendererGone = true)
             webView = createWebView()
+            updateWebViewFileAccess()
             root.addView(webView, 0, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             // After repeated crashes, never reload the same page in an endless loop.
             if (rendererCrashCount > 3) {
