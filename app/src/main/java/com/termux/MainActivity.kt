@@ -124,6 +124,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDownload = savedInstanceState?.getString("pending_download_url")
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
         val density = resources.displayMetrics.density
@@ -720,12 +721,36 @@ class MainActivity : Activity() {
     private fun runGit(dir: File, vararg args: String): String = try {
         val proc = ProcessBuilder(listOf("${Termux.PREFIX}/bin/git", "-C", dir.path) + args)
             .redirectErrorStream(true)
+            .apply {
+                environment().clear()
+                environment().putAll(Termux.environment(android.os.Process.myUid()))
+            }
             .start()
+        val output = StringBuilder()
+        // Drain while waiting: large porcelain output can fill the OS pipe.
+        val drain = Thread {
+            runCatching {
+                proc.inputStream.bufferedReader().use { reader ->
+                    val buffer = CharArray(4096)
+                    while (true) {
+                        val count = reader.read(buffer)
+                        if (count < 0) break
+                        synchronized(output) {
+                            val remaining = 8192 - output.length
+                            if (remaining > 0) output.append(buffer, 0, minOf(remaining, count))
+                        }
+                    }
+                }
+            }
+        }.apply { isDaemon = true }
+        drain.start()
         if (!proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
             proc.destroyForcibly()
+            proc.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
             ""
         } else {
-            proc.inputStream.bufferedReader().use { it.readText() }
+            drain.join(500)
+            synchronized(output) { output.toString() }
         }
     } catch (e: Exception) {
         Log.w("OpenCodieHub", "git unavailable for ${dir.name}", e)
@@ -787,11 +812,14 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Immediate re-check, not a server restart: clears the consumed pairing
-     * marker so the next poll mints a fresh link at once. A dead server is
-     * still revived by the supervisor's backoff loop, not here.
+     * Retry failed startup through the supervisor; otherwise just refresh
+     * a stale WebView pairing attempt.
      */
     private fun retryCheckNow() {
+        // A failed bootstrap leaves no supervisor to retry automatically.
+        if (OpenCodeHost.error != null) {
+            Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
+        }
         observedServerPairing = null
         nextPairingAttemptAtMs = SystemClock.elapsedRealtime()
         status.visibility = View.VISIBLE
@@ -849,8 +877,15 @@ class MainActivity : Activity() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("pending_download_url", pendingDownload)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        fileChooser?.onReceiveValue(null)
+        fileChooser = null
         webView.destroy()
         super.onDestroy()
     }

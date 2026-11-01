@@ -40,4 +40,14 @@ class RuntimeHealthTest {
         assertTrue("Waiting for OpenCode" in clean)
         assertTrue("REDACTED" in clean)
     }
+
+    @Test
+    fun installerProgressNeverDisplaysUntrustedOutput() {
+        assertEquals("Preparing Termux runtime", RuntimeHealth.installStatus("OPENCODE_PASSWORD=secret"))
+        assertEquals("Preparing Termux runtime", RuntimeHealth.installStatus("Authorization: Basic secret"))
+        assertEquals("Preparing Termux runtime", RuntimeHealth.installStatus("bootstrap emitted a user path"))
+        assertEquals("Runtime extracted", RuntimeHealth.installStatus("Runtime extracted"))
+        assertEquals("Configuring Termux packages", RuntimeHealth.installStatus("Configuring Termux packages"))
+        assertEquals("Upgrading OpenCode", RuntimeHealth.installStatus("Upgrading OpenCode old -> new"))
+    }
 }

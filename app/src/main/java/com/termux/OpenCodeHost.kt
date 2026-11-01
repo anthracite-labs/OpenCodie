@@ -34,6 +34,8 @@ object OpenCodeHost {
     @Volatile private var workspaceOverride: String? = null
 
     private var supervisor: Thread? = null
+    // Invalidates an outstanding restart handoff when the service stops.
+    private var restartGeneration = 0L
 
     @Volatile private var stopping = false
     @Volatile private var process: Process? = null
@@ -54,6 +56,7 @@ object OpenCodeHost {
 
     @Synchronized
     fun stop() {
+        restartGeneration++
         stopping = true
         process?.destroy()
         process = null
@@ -68,11 +71,9 @@ object OpenCodeHost {
     fun switchWorkspace(context: Context, name: String): Boolean {
         if (!ProjectHub.isValidProjectName(name)) return false
         stopAndWaitLocked()
-        // Latch only after the old supervisor exits: a failed stop must not
-        // leave the next auto-restart pointed at a directory the UI never
-        // confirmed.
+        // The replacement starts only after the previous supervisor exits.
         workspaceOverride = name
-        start(context)
+        startAfterSupervisorExit(context)
         return true
     }
 
@@ -85,7 +86,34 @@ object OpenCodeHost {
     @Synchronized
     fun restart(context: Context) {
         stopAndWaitLocked()
-        start(context)
+        startAfterSupervisorExit(context)
+    }
+
+    /**
+     * The three-second stop wait can expire during a slow bootstrap. Defer
+     * the replacement until the old supervisor really exits instead of
+     * silently dropping the restart. A later stop cancels the handoff.
+     * Caller holds this object's monitor.
+     */
+    private fun startAfterSupervisorExit(context: Context) {
+        val previous = supervisor
+        val generation = restartGeneration
+        if (previous == null || !previous.isAlive) {
+            start(context)
+            return
+        }
+        Thread {
+            try {
+                previous.join()
+            } catch (_: InterruptedException) {
+                return@Thread
+            }
+            synchronized(this) {
+                if (restartGeneration == generation && supervisor === previous && stopping) {
+                    start(context)
+                }
+            }
+        }.apply { isDaemon = true; start() }
     }
 
     /** Caller must hold the monitor: stop the supervisor and await its exit. */
@@ -104,7 +132,7 @@ object OpenCodeHost {
     }
     private fun supervise(context: Context) {
         try {
-            RuntimeInstaller.installIfNeeded(context) { status = it }
+            RuntimeInstaller.installIfNeeded(context) { status = RuntimeHealth.installStatus(it) }
         } catch (e: Exception) {
             fail("Could not prepare the Termux runtime", e)
             return
@@ -172,14 +200,14 @@ object OpenCodeHost {
         Thread {
             try {
                 started.inputStream.bufferedReader().forEachLine { line ->
-                    Log.i(TAG, line)
+                    // Keep server output private; only sanitized diagnostics can expose it.
                     synchronized(output) {
                         output.append(line).append('\n')
                         if (output.length > LOG_LIMIT) output.delete(0, output.length - LOG_LIMIT)
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "server output closed", e)
+                Log.w(TAG, "server output closed")
             }
         }.apply { isDaemon = true }.start()
         return started
@@ -187,9 +215,9 @@ object OpenCodeHost {
 
     /** Polls /api/info until the server answers, then redeems a pairing code. */
     private fun awaitPairing(started: Process): String {
-        val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        val deadline = android.os.SystemClock.elapsedRealtime() + READY_TIMEOUT_MS
         var attempts = 0
-        while (System.currentTimeMillis() < deadline) {
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             if (!started.isAlive) throw IllegalStateException("OpenCode exited during startup:\n${log()}")
             if (statusCode("GET", "/api/info") == 200) return pairingURL()
             attempts++
@@ -277,9 +305,10 @@ object OpenCodeHost {
     }
 
     private fun fail(message: String, e: Exception) {
-        Log.e(TAG, message, e)
+        // Public status and notifications must never include exception data.
+        Log.e(TAG, "$message (${e.javaClass.simpleName})")
         status = message
-        error = "$message: ${e.message ?: e.toString()}"
+        error = "$message (${e.javaClass.simpleName})"
     }
 
     internal fun sanitizedLog(): String = RuntimeHealth.sanitize(log())

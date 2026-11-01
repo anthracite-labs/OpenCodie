@@ -16,6 +16,18 @@ sealed interface HealthState {
 }
 
 object RuntimeHealth {
+    /** Only allow controlled installation stages into status/notifications. */
+    fun installStatus(message: String): String = when {
+        message == "Runtime extracted" -> "Runtime extracted"
+        message == "Configuring Termux packages" -> "Configuring Termux packages"
+        message.startsWith("Retrying interrupted initial installation") -> "Retrying runtime installation"
+        message.startsWith("Recovering interrupted OpenCode upgrade") -> "Recovering OpenCode upgrade"
+        message.startsWith("Upgrading OpenCode ") -> "Upgrading OpenCode"
+        message.startsWith("Runtime ") && message.endsWith(" ready") -> "Termux runtime ready"
+        message.startsWith("Termux runtime ") && message.endsWith(" ready") -> "Termux runtime ready"
+        else -> "Preparing Termux runtime"
+    }
+
     fun current(status: String, error: String?): HealthState {
         if (error != null) return HealthState.Failed(failureCode(error), error)
         val s = status.lowercase()

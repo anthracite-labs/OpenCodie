@@ -64,6 +64,7 @@ object RuntimeInstaller {
             selectDefaultMirror(prefix)
             runSecondStage(prefix, log)
             writeOpenCodeConfig(log)
+            verifyInstalledExecutables(prefix)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
@@ -77,13 +78,25 @@ object RuntimeInstaller {
         if (installed != bundled) {
             log("Upgrading OpenCode $installed -> $bundled")
             upgrade(context, prefix, files)
+            // Validate before committing the new version or deleting rollback backups.
+            verifyInstalledExecutables(prefix)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             clearUpgradeBackup(files)
         }
         ensureDirectories(prefix)
         writeOpenCodeConfig(log)
+        verifyInstalledExecutables(prefix)
         log("Runtime $bundled ready")
+    }
+
+    /** Check the ready marker against the actual executable without removing user files. */
+    private fun verifyInstalledExecutables(prefix: File) {
+        val executable = File(prefix, "bin/opencode")
+        val binary = File(prefix, "libexec/opencode/opencode.bin")
+        check(executable.isFile && executable.canExecute() &&
+            binary.isFile && binary.canExecute()
+        ) { "OpenCode executable missing or not executable; existing Termux files preserved" }
     }
 
     /** Select the stock Termux origin mirror before the first pkg call. */
