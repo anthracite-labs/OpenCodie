@@ -10,7 +10,7 @@ internal object WebRecoveryPolicy {
 
     fun classifySessionHttp(code: Int?): SessionValidation = when (code) {
         200 -> SessionValidation.VALID
-        401, 403 -> SessionValidation.EXPIRED
+        301, 302, 303, 307, 308, 401, 403 -> SessionValidation.EXPIRED
         else -> SessionValidation.TRANSIENT
     }
 
