@@ -37,7 +37,7 @@ object RuntimeInstaller {
     private const val READY_FILE = ".opencodie-ready"
     private const val INSTALLING_FILE = ".opencodie-installing"
 
-    fun installIfNeeded(
+    internal fun installIfNeeded(
         context: Context,
         log: (String) -> Unit,
         onStage: (StartupEvent) -> Unit = {},
