@@ -63,6 +63,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     private var notificationStatus: TextView? = null
     private var startupDetail: TextView? = null
     private var startupRows: List<TextView> = emptyList()
+    private var retryNotice: TextView? = null
+    private var retryDiagnosticsButton: Button? = null
     private var noticeView: TextView? = null
     private var latestNotice: String? = null
 
@@ -124,6 +126,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         notificationStatus = null
         startupDetail = null
         startupRows = emptyList()
+        retryNotice = null
+        retryDiagnosticsButton = null
         noticeView = null
 
         val scroll = ScrollView(context).apply {
@@ -229,6 +233,10 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                         space(state, 14)
                     }
                 }
+                retryNotice = text("", TypeRole.SUPPORT, noticeColor).apply {
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                    visibility = View.GONE
+                }.also { state.addView(it) }
                 column.addView(state)
             }
             else -> Unit
@@ -261,6 +269,10 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             Screen.PREPARING, Screen.CONNECTING -> {
                 column.addView(text(context.getString(R.string.onboarding_local_note),
                     TypeRole.CAPTION, secondaryColor).apply { gravity = Gravity.CENTER })
+                space(column, 12)
+                retryDiagnosticsButton = secondary(column,
+                    context.getString(R.string.onboarding_diagnostics),
+                    actions::diagnostics).apply { visibility = View.GONE }
             }
         }
         refreshDynamic(presentation)
@@ -334,7 +346,18 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             StartupEvent.SERVER_READY -> R.string.onboarding_stage_connecting
             StartupEvent.WEBVIEW_READY -> R.string.onboarding_stage_ready
         })
-        if (startupDetail?.text != detail) startupDetail?.text = detail
+        val activeDetail = if (p.startup.retrying)
+            context.getString(R.string.onboarding_retrying_server)
+        else detail
+        if (startupDetail?.text != activeDetail) startupDetail?.text = activeDetail
+        retryNotice?.apply {
+            val message = p.startup.lastFailure ?: context.getString(R.string.onboarding_server_stopped)
+            val value = context.getString(R.string.onboarding_last_server_issue, message)
+            if (text != value) text = value
+            visibility = if (p.startup.retrying) View.VISIBLE else View.GONE
+        }
+        retryDiagnosticsButton?.visibility =
+            if (p.startup.retrying) View.VISIBLE else View.GONE
         startupRows.forEachIndexed { index, row ->
             val label = context.getString(when (index) {
                 0 -> R.string.onboarding_step_runtime
@@ -420,7 +443,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         parent.addView(button, LinearLayout.LayoutParams(-1, -2))
     }
 
-    private fun secondary(parent: LinearLayout, label: String, action: () -> Unit) {
+    private fun secondary(parent: LinearLayout, label: String, action: () -> Unit): Button {
         val button = Button(context).apply {
             text = label
             textSize = TypeRole.LABEL.sp
@@ -431,6 +454,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             setOnClickListener { action() }
         }
         parent.addView(button, LinearLayout.LayoutParams(-1, -2))
+        return button
     }
 
     private fun text(value: String, role: TypeRole, color: Int, bold: Boolean = false): TextView =
