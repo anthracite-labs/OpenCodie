@@ -1,6 +1,7 @@
 package com.termux
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
@@ -103,6 +104,8 @@ class MainActivity : Activity() {
         webView.settings.textZoom = (resources.configuration.fontScale * 100).toInt()
     }
 
+    // Indices are positional into the intArrayOf() above, not R.styleable refs.
+    @SuppressLint("ResourceType")
     private fun themeColors(): Pair<Int, Int> {
         val attrs = obtainStyledAttributes(intArrayOf(android.R.attr.colorBackground, android.R.attr.textColorPrimary))
         try {
