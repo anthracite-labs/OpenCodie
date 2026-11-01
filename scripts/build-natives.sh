@@ -53,7 +53,9 @@ echo "==> cargo build $TARGET"
 (
     cd "$SRC/rust-pty"
     rustup target add "$TARGET"
-    cargo build --locked --release --target "$TARGET"
+    # No --locked: bun-pty-portable09.patch bumps portable-pty 0.8->0.9, so
+    # Cargo.lock must update on first build; source is still commit-pinned.
+    cargo build --release --target "$TARGET"
 )
 BUILT="$SRC/rust-pty/target/$TARGET/release/librust_pty.so"
 test -f "$BUILT" || { echo "missing built library: $BUILT" >&2; exit 1; }

@@ -45,29 +45,41 @@ android {
     androidResources { noCompress += "zip" }
 
     signingConfigs {
-        val keystore = System.getenv("OPENCODIE_KEYSTORE_FILE")
-        if (keystore != null) {
+        // Created only when the keystore env is present so debug/lint/unit-test
+        // configuration (which never signs) still works without secrets.
+        // Release builds fail fast at execution time if signing is missing.
+        if (System.getenv("OPENCODIE_KEYSTORE_FILE") != null) {
             create("release") {
-                storeFile = file(keystore)
+                storeFile = file(System.getenv("OPENCODIE_KEYSTORE_FILE"))
                 storePassword = System.getenv("OPENCODIE_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("OPENCODIE_KEY_ALIAS")
                 keyPassword = System.getenv("OPENCODIE_KEY_PASSWORD")
             }
-        } else {
-            error("OPENCODIE_KEYSTORE_FILE must be set for release signing (fail-closed, no silent unsigned APK)")
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+// Fail closed at execution time only: assembling a release without the
+// keystore env must never produce a silent unsigned APK, but debug/lint/
+// unit-test configuration must work without secrets.
+gradle.taskGraph.whenReady {
+    val wantsRelease = allTasks.any {
+        it.name.contains("Release", ignoreCase = true) && it.name.contains("Assemble", ignoreCase = true)
+    }
+    if (wantsRelease && System.getenv("OPENCODIE_KEYSTORE_FILE") == null) {
+        throw GradleException("OPENCODIE_KEYSTORE_FILE must be set for release signing (fail-closed, no silent unsigned APK)")
     }
 }
 
