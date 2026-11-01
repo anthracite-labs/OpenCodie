@@ -67,4 +67,7 @@
     <string name="onboarding_stage_connecting">Authenticating the workspace…</string>
     <string name="onboarding_stage_ready">Workspace ready</string>
     <string name="onboarding_stage_failed">Stopped during: %1$s</string>
+    <string name="onboarding_retrying_server">Retrying the local OpenCode server…</string>
+    <string name="onboarding_last_server_issue">Last issue: %1$s</string>
+    <string name="onboarding_server_stopped">Server stopped unexpectedly</string>
 </resources>
