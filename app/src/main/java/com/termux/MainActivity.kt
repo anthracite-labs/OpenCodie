@@ -427,8 +427,10 @@ class MainActivity : Activity() {
                     "music" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
                     "movies" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
                     "podcasts" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PODCASTS),
-                    "audiobooks" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_AUDIOBOOKS),
                 )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    links["audiobooks"] = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_AUDIOBOOKS)
+                }
                 getExternalFilesDirs(null).forEachIndexed { index, dir ->
                     if (dir != null) links["external-$index"] = dir
                 }
