@@ -38,16 +38,9 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     private data class Presentation(
         val screen: Screen,
         val title: String,
-        val storageGranted: Boolean,
-        val storageLinksReady: Boolean,
-        val storageSetupFailed: Boolean,
-        val storageAttempted: Boolean,
-        val notificationsGranted: Boolean,
-        val notificationsAttempted: Boolean,
+        val storagePermission: PermissionPresentation,
+        val notificationsPermission: PermissionPresentation,
         val failureMessage: String?,
-        val storagePending: Boolean,
-        val notificationsPending: Boolean,
-        val permissionsBusy: Boolean,
         val startup: StartupSnapshot,
     )
 
@@ -83,10 +76,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     fun refreshTheme() {
         previousScreen = null
         lastPresentation?.let {
-            show(it.screen, it.title, it.storageGranted, it.storageLinksReady,
-                it.storageSetupFailed, it.storageAttempted, it.notificationsGranted,
-                it.notificationsAttempted, it.failureMessage, it.storagePending,
-                it.notificationsPending, it.permissionsBusy, it.startup)
+            show(it.screen, it.title, it.storagePermission, it.notificationsPermission,
+                it.failureMessage, it.startup)
         }
     }
 
@@ -108,22 +99,15 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     fun show(
         screen: Screen,
         preparationTitle: String = context.getString(R.string.onboarding_preparing_title),
-        storageGranted: Boolean = false,
-        storageLinksReady: Boolean = false,
-        storageSetupFailed: Boolean = false,
-        storageAttempted: Boolean = false,
-        notificationsGranted: Boolean = false,
-        notificationsAttempted: Boolean = false,
+        storagePermission: PermissionPresentation =
+            PermissionDecision().presentation(PermissionKind.STORAGE, false, false),
+        notificationsPermission: PermissionPresentation =
+            PermissionDecision().presentation(PermissionKind.NOTIFICATIONS, false, false),
         failureMessage: String? = null,
-        storagePending: Boolean = false,
-        notificationsPending: Boolean = false,
-        permissionsBusy: Boolean = false,
         startup: StartupSnapshot = StartupTimeline.describe(StartupEvent.PREPARING_RUNTIME),
     ) {
-        val presentation = Presentation(screen, preparationTitle, storageGranted,
-            storageLinksReady, storageSetupFailed, storageAttempted, notificationsGranted,
-            notificationsAttempted, failureMessage, storagePending, notificationsPending,
-            permissionsBusy, startup)
+        val presentation = Presentation(screen, preparationTitle, storagePermission,
+            notificationsPermission, failureMessage, startup)
         lastPresentation = presentation
         if (previousScreen == screen) {
             refreshDynamic(presentation)
@@ -311,38 +295,33 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         if (headline?.text != newTitle) headline?.text = newTitle
         if (description?.text != newDescription) description?.text = newDescription
 
-        fun label(granted: Boolean, attempted: Boolean, pending: Boolean): String =
-            context.getString(when {
-                pending -> R.string.onboarding_requesting
-                granted -> R.string.onboarding_allowed
-                attempted -> R.string.onboarding_not_enabled
-                else -> R.string.onboarding_not_configured
-            })
-
         fun updatePermission(
-            statusView: TextView?, button: Button?, granted: Boolean,
-            attempted: Boolean, pending: Boolean, actionDescription: Int,
-            retrySetup: Boolean = false,
+            statusView: TextView?, button: Button?, presentation: PermissionPresentation,
+            actionDescription: Int,
         ) {
-            val status = label(granted, attempted, pending)
+            val status = context.getString(when (presentation.status) {
+                PermissionStatus.GRANT -> R.string.onboarding_not_configured
+                PermissionStatus.REQUESTING -> R.string.onboarding_requesting
+                PermissionStatus.ALLOWED -> R.string.onboarding_allowed
+                PermissionStatus.NOT_ENABLED -> R.string.onboarding_not_enabled
+            })
             if (statusView?.text != status) statusView?.text = status
             button?.apply {
-                val nextLabel = context.getString(when {
-                    pending -> R.string.onboarding_requesting
-                    retrySetup -> R.string.onboarding_retry_setup
-                    granted -> R.string.onboarding_change_access
-                    else -> R.string.onboarding_grant_access
+                val nextLabel = context.getString(when (presentation.action) {
+                    PermissionAction.GRANT -> R.string.onboarding_grant_access
+                    PermissionAction.CHANGE -> R.string.onboarding_change_access
+                    PermissionAction.RETRY_SETUP -> R.string.onboarding_retry_setup
+                    PermissionAction.CANCEL -> R.string.onboarding_cancel_request
                 })
                 if (text != nextLabel) text = nextLabel
                 contentDescription = context.getString(actionDescription, nextLabel)
-                isEnabled = !p.permissionsBusy
+                isEnabled = presentation.enabled
             }
         }
-        updatePermission(storageStatus, storageButton, p.storageGranted, p.storageAttempted,
-            p.storagePending, R.string.onboarding_storage_action,
-            p.storageGranted && p.storageSetupFailed)
-        updatePermission(notificationStatus, notificationsButton, p.notificationsGranted,
-            p.notificationsAttempted, p.notificationsPending, R.string.onboarding_notifications_action)
+        updatePermission(storageStatus, storageButton, p.storagePermission,
+            R.string.onboarding_storage_action)
+        updatePermission(notificationStatus, notificationsButton, p.notificationsPermission,
+            R.string.onboarding_notifications_action)
 
         val detail = context.getString(when (p.startup.event) {
             StartupEvent.PREPARING_RUNTIME -> R.string.onboarding_stage_preparing
