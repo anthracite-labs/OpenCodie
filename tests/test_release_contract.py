@@ -76,6 +76,14 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn('maybeRequestBootstrapStorage()', section_after(activity, "private fun poll()"))
         self.assertIn('requestStorageAccess()', section_after(activity, "private fun maybeRequestBootstrapStorage()"))
 
+    def test_audiobooks_storage_link_requires_api_29(self):
+        activity = read("app/src/main/java/com/termux/MainActivity.kt")
+        self.assertRegex(
+            activity,
+            r'if \\(Build\\.VERSION\\.SDK_INT >= Build\\.VERSION_CODES\\.Q\\) \\{\\s*'
+            r'links\\["audiobooks"\\] = Environment\\.getExternalStoragePublicDirectory\\(Environment\\.DIRECTORY_AUDIOBOOKS\\)',
+        )
+
     def test_termux_setup_storage_bridge(self):
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
         activity = (ROOT / "app/src/main/java/com/termux/MainActivity.kt").read_text()
