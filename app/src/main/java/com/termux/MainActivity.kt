@@ -110,9 +110,14 @@ class MainActivity : Activity() {
             if (resolved != null) {
                 commitPermissionResolution(resolved)
             } else if (restoredPendingRequest) {
+                // Activity recreation may occur while the OS owns the dialog.
+                // Only finish here when Android has actually returned focus.
                 restoredPendingRequest = false
                 permissionDecision.pending?.let { finishPermissionRequest(it) }
             }
+            // A grant can also change while Settings/OS UI is open without
+            // an active request, such as after an explicit Cancel.
+            updateOnboarding()
         }
     }
 
@@ -265,6 +270,11 @@ class MainActivity : Activity() {
                 updateOnboarding()
             }
             override fun requestStorage() {
+                if (permissionDecision.pending == PermissionKind.STORAGE) {
+                    permissionDecision.finish(PermissionKind.STORAGE)
+                    updateOnboarding()
+                    return
+                }
                 if (!permissionDecision.begin(PermissionKind.STORAGE)) return
                 // These are bootstrap *opt-in* flags; UI attempt state is committed
                 // only after Android returns, in commitPermissionResolution().
@@ -280,16 +290,17 @@ class MainActivity : Activity() {
                 }
             }
             override fun requestNotifications() {
+                if (permissionDecision.pending == PermissionKind.NOTIFICATIONS) {
+                    // Some Android builds may not show the first legacy-target
+                    // dialog. Let the user cancel instead of inferring a
+                    // denial from a timer or leaving the control stuck.
+                    permissionDecision.finish(PermissionKind.NOTIFICATIONS)
+                    updateOnboarding()
+                    return
+                }
                 if (!permissionDecision.begin(PermissionKind.NOTIFICATIONS)) return
                 updateOnboarding()
                 requestNotificationPermission()
-                // Some OEMs do not show the channel-created prompt. If no
-                // permission surface took focus, settle the neutral state.
-                handler.postDelayed({
-                    if (!isDestroyed && permissionDecision.pending == PermissionKind.NOTIFICATIONS &&
-                        resumed && hasWindowFocus()
-                    ) finishPermissionRequest(PermissionKind.NOTIFICATIONS)
-                }, 2_500L)
             }
             override fun continueToWorkspace() {
                 permissionPrefs.edit()
@@ -390,17 +401,21 @@ class MainActivity : Activity() {
         onboarding.show(
             screen = screen,
             preparationTitle = getString(R.string.onboarding_preparing_title),
-            storageGranted = hasStoragePermission(),
-            storageLinksReady = hasStoragePermission() &&
-                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-                    .getBoolean("storage_links_ready", false),
-            storageSetupFailed = storageSetupFailed,
-            storageAttempted = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
-                .getBoolean("storage_attempted", false) ||
-                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-                    .getBoolean("storage_links_ready", false),
-            notificationsAttempted = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
-                .getBoolean("notifications_attempted", false),
+            storagePermission = permissionDecision.presentation(
+                PermissionKind.STORAGE,
+                granted = hasStoragePermission(),
+                everAsked = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+                    .getBoolean("storage_attempted", false) ||
+                    getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+                        .getBoolean("storage_links_ready", false),
+                retrySetup = hasStoragePermission() && storageSetupFailed,
+            ),
+            notificationsPermission = permissionDecision.presentation(
+                PermissionKind.NOTIFICATIONS,
+                granted = hasNotificationAccess(),
+                everAsked = getSharedPreferences("opencodie_permissions", MODE_PRIVATE)
+                    .getBoolean("notifications_attempted", false),
+            ),
             failureMessage = if (screen == OnboardingView.Screen.FAILED) {
                 val hostError = OpenCodeHost.error
                 when {
@@ -411,10 +426,6 @@ class MainActivity : Activity() {
                     else -> null
                 }
             } else null,
-            notificationsGranted = hasNotificationAccess(),
-            storagePending = permissionDecision.pending == PermissionKind.STORAGE,
-            notificationsPending = permissionDecision.pending == PermissionKind.NOTIFICATIONS,
-            permissionsBusy = permissionDecision.pending != null,
             startup = startupSnapshot,
         )
     }
