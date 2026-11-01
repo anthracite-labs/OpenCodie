@@ -25,9 +25,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Parcel
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams
 import android.webkit.CookieManager
 import android.webkit.URLUtil
@@ -36,17 +38,22 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CancellationException
 
 /**
  * Shows the OpenCode WebUI served by the bundled server on loopback.
@@ -55,6 +62,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class MainActivity : Activity() {
     private lateinit var webView: WebView
+    private lateinit var root: FrameLayout
+    private var restoredWebHistory: Bundle? = null
+    private var restoredWorkspaceUrl: String? = null
+    private var lastNightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
+    private var webRetryAttempts = 0
+    private var webFailureReason: String? = null
+    private var activeLoadFailed = false
+    private var rendererCrashWindowMs = 0L
+    private var rendererCrashCount = 0
+    private val downloadCancelled = AtomicBoolean(false)
+    private var downloadDialog: AlertDialog? = null
     private lateinit var status: TextView
     private lateinit var retry: Button
     private lateinit var onboarding: OnboardingView
@@ -144,7 +162,13 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         applyStatusTheme()
         webView.settings.textZoom = (resources.configuration.fontScale * 100).toInt()
-        onboarding.refreshTheme()
+        val mode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (lastNightMode != mode) {
+            lastNightMode = mode
+            onboarding.refreshTheme()
+        } else {
+            onboarding.refreshContentWidth()
+        }
         updateOnboarding()
     }
 
@@ -168,6 +192,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lastNightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        restoredWebHistory = savedInstanceState?.getBundle("web_navigation")
+        restoredWorkspaceUrl = savedInstanceState?.getString("workspace_url")?.takeIf {
+            OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+        }
         pendingDownload = savedInstanceState?.getString("pending_download_url")
         val restoredKind = savedInstanceState?.getString("pending_permission")
             ?.let { runCatching { PermissionKind.valueOf(it) }.getOrNull() }
@@ -233,27 +262,7 @@ class MainActivity : Activity() {
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
         }
-        webView = WebView(this).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.textZoom = (resources.configuration.fontScale * 100).toInt()
-            settings.databaseEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            // Secure default: no file access until the user grants storage.
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.allowFileAccessFromFileURLs = false
-            settings.allowUniversalAccessFromFileURLs = false
-            settings.safeBrowsingEnabled = true
-            webViewClient = client
-            webChromeClient = chrome
-            setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                val uri = Uri.parse(url)
-                if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
-                    uri.port == OpenCodeHost.PORT
-                ) download(url, contentDisposition, mimeType)
-            }
-        }
+        webView = createWebView()
         updateWebViewFileAccess()
         val retryLp = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -320,7 +329,7 @@ class MainActivity : Activity() {
         })
         webView.visibility = View.INVISIBLE
         status.visibility = View.GONE
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             addView(retry, retryLp)
@@ -341,6 +350,37 @@ class MainActivity : Activity() {
         }
         updateOnboarding()
         poll()
+    }
+
+    /** Reused after renderer termination; never reuse a WebView with a dead renderer. */
+    private fun createWebView(): WebView = WebView(this).apply {
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.textZoom = (resources.configuration.fontScale * 100).toInt()
+        settings.databaseEnabled = true
+        settings.mediaPlaybackRequiresUserGesture = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = true
+        settings.allowFileAccessFromFileURLs = false
+        settings.allowUniversalAccessFromFileURLs = false
+        settings.safeBrowsingEnabled = true
+        webViewClient = client
+        webChromeClient = chrome
+        setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            val uri = Uri.parse(url)
+            if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
+                uri.port == OpenCodeHost.PORT
+            ) download(url, contentDisposition, mimeType)
+        }
+    }
+
+    private fun disposeWebView(view: WebView, rendererGone: Boolean = false) {
+        (view.parent as? ViewGroup)?.removeView(view)
+        if (!rendererGone) {
+            view.stopLoading()
+            view.clearHistory()
+        }
+        view.destroy()
     }
 
     /** WebView file:// access stays disabled. Android document-picker content://
