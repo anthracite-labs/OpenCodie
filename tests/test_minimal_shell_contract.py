@@ -27,7 +27,9 @@ class MinimalShellContractTest(unittest.TestCase):
         self.assertNotIn("showSavedDialog(", activity)
         self.assertNotIn("FileTransfer.", activity)
         self.assertIn("Intent.ACTION_CREATE_DOCUMENT", activity)
-        self.assertIn("request.readTimeout", activity)\n        self.assertIn("downloadCancelled.get()", activity)\n        self.assertIn("contentResolver.openOutputStream(destination", activity)
+        self.assertIn("request.readTimeout", activity)
+        self.assertIn("downloadCancelled.get()", activity)
+        self.assertIn("contentResolver.openOutputStream(destination", activity)
 
     def test_pr28_design_assets_and_ui_slice_modules_are_removed(self):
         self.assertFalse((ROOT / "design-system/opencodie").exists())
