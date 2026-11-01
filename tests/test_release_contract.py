@@ -266,6 +266,34 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("const val CHANNEL_ID = \"opencode\"", service)
         self.assertIn("enum class NotificationAction", flow)
 
+    def test_no_guessed_permission_verdict_and_shared_presentation(self):
+        activity = read("app/src/main/java/com/termux/MainActivity.kt")
+        view = read("app/src/main/java/com/termux/OnboardingView.kt")
+        model = read("app/src/main/java/com/termux/PermissionDecision.kt")
+        self.assertNotIn("2_500L", activity)
+        self.assertIn("permissionDecision.presentation(", activity)
+        self.assertIn("p.storagePermission", view)
+        self.assertIn("p.notificationsPermission", view)
+        self.assertNotIn("fun label(granted: Boolean, attempted: Boolean, pending: Boolean)", view)
+        self.assertIn("PermissionAction.CANCEL", view)
+        self.assertIn("pending_permission_focus_lost", activity)
+        self.assertIn("hadFocusLoss", model)
+
+    def test_recoverable_server_retries_and_pr_debug_apk(self):
+        host = read("app/src/main/java/com/termux/OpenCodeHost.kt")
+        view = read("app/src/main/java/com/termux/OnboardingView.kt")
+        timeline = read("app/src/main/java/com/termux/StartupTimeline.kt")
+        workflow = read(".github/workflows/build-and-release.yml")
+        self.assertIn("startup.noteServerFailure(", host)
+        self.assertIn("retryingServer", timeline)
+        self.assertIn("lastFailureReason", timeline)
+        self.assertIn("retryDiagnosticsButton", view)
+        self.assertIn("Upload PR debug APK for device acceptance", workflow)
+        self.assertIn("app/build/outputs/apk/debug/app-debug.apk", workflow)
+        self.assertIn("github.event_name == 'pull_request'", workflow)
+        self.assertIn("if-no-files-found: error", workflow)
+        self.assertIn("retention-days: 7", workflow)
+
     def test_loopback_cleartext_only_with_manifest_permissions(self):
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
         config = (ROOT / "app/src/main/res/xml/network_security_config.xml").read_text()
