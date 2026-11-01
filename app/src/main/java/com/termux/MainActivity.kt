@@ -931,6 +931,7 @@ class MainActivity : Activity() {
             .setNegativeButton(android.R.string.cancel) { _, _ -> downloadCancelled.set(true) }
             .create()
         downloadDialog = dialog
+        dialog.setOnCancelListener { downloadCancelled.set(true) }
         dialog.show()
         Thread {
             var connection: HttpURLConnection? = null
