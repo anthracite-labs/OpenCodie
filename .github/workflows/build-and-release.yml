@@ -263,8 +263,8 @@ jobs:
           BT="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS }}"
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.termux'" "$RUNNER_TEMP/badging.txt"
-          grep -Eq "^(minSdkVersion|sdkVersion):'29'$" "$RUNNER_TEMP/badging.txt"
-          grep -Fxq "targetSdkVersion:'29'" "$RUNNER_TEMP/badging.txt"
+          grep -Eq "^(minSdkVersion|sdkVersion):'28'$" "$RUNNER_TEMP/badging.txt"
+          grep -Fxq "targetSdkVersion:'28'" "$RUNNER_TEMP/badging.txt"
           source ./runtime.lock
           grep -Fq "versionName='${OPENCODE_VERSION#v}'" "$RUNNER_TEMP/badging.txt"
           unzip -p "$APK" assets/runtime-aarch64.zip > "$RUNNER_TEMP/runtime.zip"
