@@ -260,6 +260,16 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                     TypeRole.CAPTION, secondaryColor).apply { gravity = Gravity.CENTER })
             }
             Screen.FAILED -> {
+                column.addView(text(context.getString(
+                    R.string.onboarding_stage_failed,
+                    context.getString(when (presentation.startup.active) {
+                        StartupStep.RUNTIME -> R.string.onboarding_step_runtime
+                        StartupStep.PACKAGES -> R.string.onboarding_step_packages
+                        StartupStep.SERVER -> R.string.onboarding_step_server
+                        StartupStep.WEBVIEW, StartupStep.READY -> R.string.onboarding_step_workspace
+                    }),
+                ), TypeRole.SUPPORT, noticeColor))
+                space(column, 20)
                 primary(column, context.getString(R.string.onboarding_retry), actions::retry)
                 space(column, 12)
                 secondary(column, context.getString(R.string.onboarding_diagnostics), actions::diagnostics)
