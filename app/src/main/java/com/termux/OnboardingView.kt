@@ -162,7 +162,7 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         when (screen) {
             Screen.WELCOME -> primary(column, "Get started", actions::getStarted)
             Screen.PERMISSIONS -> {
-                primary(column, "Continue to workspace", actions::continueToWorkspace)
+                primary(column, if (!storageGranted && !notificationsGranted) "Not now, continue" else "Continue to workspace", actions::continueToWorkspace)
                 space(column, 12)
                 column.addView(text("Permissions can be changed later in Android Settings.", 12f, secondaryColor)
                     .apply { gravity = Gravity.CENTER })
