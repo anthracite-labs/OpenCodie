@@ -12,11 +12,15 @@ internal data class PermissionPresentation(
     val enabled: Boolean,
 )
 
-internal class PermissionDecision(initialPending: PermissionKind? = null) {
+internal class PermissionDecision(
+    initialPending: PermissionKind? = null,
+    initialFocusWasLost: Boolean = false,
+) {
     var pending: PermissionKind? = initialPending
         private set
 
-    private var focusWasLost = false
+    private var focusWasLost = initialPending != null && initialFocusWasLost
+    val hadFocusLoss: Boolean get() = focusWasLost
 
     fun begin(kind: PermissionKind): Boolean {
         if (pending != null) return false
