@@ -71,17 +71,11 @@ android {
     }
 }
 
-// Fail closed at execution time only: assembling a release without the
-// keystore env must never produce a silent unsigned APK, but debug/lint/
-// unit-test configuration must work without secrets.
-gradle.taskGraph.whenReady {
-    val wantsRelease = allTasks.any {
-        it.name.contains("Release", ignoreCase = true) && it.name.contains("Assemble", ignoreCase = true)
-    }
-    if (wantsRelease && System.getenv("OPENCODIE_KEYSTORE_FILE") == null) {
-        throw GradleException("OPENCODIE_KEYSTORE_FILE must be set for release signing (fail-closed, no silent unsigned APK)")
-    }
-}
+// Note: release signing stays lenient here on purpose. CodeQL autobuild,
+// dependency-submission and lint configure `assemble` without secrets.
+// Fail-closed happens one layer up: scripts/build-release.sh preflights the
+// keystore file, and .github/workflows/build-and-release.yml verifies the
+// signature with apksigner before publishing.
 
 dependencies {
     // Minimal unit-test framework for timeout/regression tests.
