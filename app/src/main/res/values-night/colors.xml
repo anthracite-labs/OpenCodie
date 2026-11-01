@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="onboarding_background">#111116</color>
+    <color name="onboarding_surface">#1D1D26</color>
+    <color name="onboarding_accent">#B9A4FF</color>
+    <color name="onboarding_text">#F7F6FF</color>
+    <color name="onboarding_secondary">#A6A4B4</color>
+    <color name="onboarding_outline">#3C394A</color>
+    <color name="onboarding_on_accent">#111116</color>
+    <color name="onboarding_notice">#FFB4C8</color>
+</resources>
