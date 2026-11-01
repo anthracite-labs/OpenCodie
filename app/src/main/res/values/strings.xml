@@ -33,7 +33,7 @@
     <string name="onboarding_retry">Try again</string>
     <string name="onboarding_diagnostics">View diagnostics</string>
     <string name="onboarding_local_note">Your files and existing work stay on your device.</string>
-    <string name="onboarding_allowed">Connected</string>
+    <string name="onboarding_allowed">Allowed</string>
     <string name="onboarding_allow">Allow</string>
     <string name="onboarding_retry_setup">Retry setup</string>
     <string name="onboarding_connect_files">Connect files</string>
