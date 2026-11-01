@@ -2,13 +2,13 @@ package com.termux
 
 import android.content.Context
 import android.content.res.ColorStateList
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -16,9 +16,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * A native, Kotlin-only first-launch experience. The WebView remains a separate
- * sibling; this screen never loads scripts, changes the OpenCode UI, or owns the
- * OpenCode process lifecycle.
+ * Native onboarding only. The WebView and host remain independent.
+ * Re-render only when the screen changes: state updates must not steal focus
+ * or reset a partially scrolled permissions screen.
  */
 internal class OnboardingView(context: Context, private val actions: Actions) : FrameLayout(context) {
     interface Actions {
@@ -31,110 +31,159 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     }
 
     enum class Screen { WELCOME, PERMISSIONS, PREPARING, CONNECTING, FAILED }
+    private enum class TypeRole(val sp: Float) {
+        HERO(30f), BRAND(18f), BODY(15f), ACTION(16f), LABEL(14f), SUPPORT(13f), CAPTION(12f)
+    }
 
-    private val backgroundColor = Color.rgb(17, 17, 22)
-    private val surfaceColor = Color.rgb(29, 29, 38)
-    private val accentColor = Color.rgb(185, 164, 255)
-    private val titleColor = Color.rgb(247, 246, 255)
-    private val secondaryColor = Color.rgb(166, 164, 180)
-    private val borderColor = Color.rgb(60, 57, 74)
-    private var previousKey = ""
+    private data class Presentation(
+        val screen: Screen,
+        val title: String,
+        val storageGranted: Boolean,
+        val storageLinksReady: Boolean,
+        val storageSetupFailed: Boolean,
+        val notificationsGranted: Boolean,
+        val failureMessage: String?,
+    )
+
+    private val backgroundColor get() = context.getColor(R.color.onboarding_background)
+    private val surfaceColor get() = context.getColor(R.color.onboarding_surface)
+    private val accentColor get() = context.getColor(R.color.onboarding_accent)
+    private val titleColor get() = context.getColor(R.color.onboarding_text)
+    private val secondaryColor get() = context.getColor(R.color.onboarding_secondary)
+    private val borderColor get() = context.getColor(R.color.onboarding_outline)
+    private val buttonTextColor get() = context.getColor(R.color.onboarding_on_accent)
+    private val noticeColor get() = context.getColor(R.color.onboarding_notice)
+
+    private var previousScreen: Screen? = null
+    private var lastPresentation: Presentation? = null
+    private var headline: TextView? = null
+    private var description: TextView? = null
+    private var storageButton: Button? = null
+    private var notificationsButton: Button? = null
+    private var noticeView: TextView? = null
+    private var latestNotice: String? = null
 
     init {
         setBackgroundColor(backgroundColor)
-        isClickable = true // The user cannot interact with the hidden WebView.
+        isClickable = true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    }
+
+    /** uiMode is handled by MainActivity without recreating the WebView. */
+    fun refreshTheme() {
+        previousScreen = null
+        lastPresentation?.let {
+            show(it.screen, it.title, it.storageGranted, it.storageLinksReady,
+                it.storageSetupFailed, it.notificationsGranted, it.failureMessage)
+        }
+    }
+
+    /** Visible above the permission controls, and politely announced by TalkBack. */
+    fun setNotice(message: String) {
+        latestNotice = message
+        noticeView?.apply {
+            text = message
+            visibility = View.VISIBLE
+        }
+        postDelayed({
+            if (latestNotice == message) {
+                latestNotice = null
+                noticeView?.visibility = View.GONE
+            }
+        }, 6_000L)
     }
 
     fun show(
         screen: Screen,
-        preparationTitle: String = "Preparing your workspace",
+        preparationTitle: String = context.getString(R.string.onboarding_preparing_title),
         storageGranted: Boolean = false,
+        storageLinksReady: Boolean = false,
+        storageSetupFailed: Boolean = false,
         notificationsGranted: Boolean = false,
+        failureMessage: String? = null,
     ) {
-        val key = "$screen|$preparationTitle|$storageGranted|$notificationsGranted"
-        if (previousKey == key) return
-        previousKey = key
+        val presentation = Presentation(screen, preparationTitle, storageGranted,
+            storageLinksReady, storageSetupFailed, notificationsGranted, failureMessage)
+        lastPresentation = presentation
+        if (previousScreen == screen) {
+            refreshDynamic(presentation)
+            return
+        }
+        previousScreen = screen
         removeAllViews()
+        setBackgroundColor(backgroundColor)
+        headline = null
+        description = null
+        storageButton = null
+        notificationsButton = null
+        noticeView = null
 
         val scroll = ScrollView(context).apply {
             isFillViewport = true
             clipToPadding = false
-            isVerticalScrollBarEnabled = false
         }
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(28))
+            setPadding(dp(24), dp(24), dp(24), dp(24))
         }
-        scroll.addView(column, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-        ))
+        scroll.addView(column, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        // Header
-        val top = LinearLayout(context).apply {
+        val header = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
             orientation = LinearLayout.HORIZONTAL
         }
-        top.addView(mark(dp(38)))
-        top.addView(text("OpenCodie", 18f, titleColor, true).apply {
-            setPadding(dp(12), 0, 0, 0)
+        header.addView(mark(dp(38)))
+        header.addView(text(context.getString(R.string.app_name), TypeRole.BRAND, titleColor, true).apply {
+            setPaddingRelative(dp(12), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(text(when (screen) {
-            Screen.WELCOME -> "WELCOME"
-            Screen.PERMISSIONS -> "YOUR CHOICE"
-            else -> "WORKSPACE"
-        }, 11f, secondaryColor, true))
-        column.addView(top)
-
-        // Centre the main message on tall devices, but scroll naturally on small ones.
-        column.addView(View(context), LinearLayout.LayoutParams(1, 0, 0.8f).apply {
-            height = dp(30)
-        })
+        header.addView(text(context.getString(when (screen) {
+            Screen.WELCOME -> R.string.onboarding_welcome_tag
+            Screen.PERMISSIONS -> R.string.onboarding_permissions_tag
+            else -> R.string.onboarding_workspace_tag
+        }), TypeRole.CAPTION, secondaryColor, true))
+        column.addView(header)
+        space(column, 32)
         column.addView(mark(dp(80)), LinearLayout.LayoutParams(dp(80), dp(80)))
-        space(column, 30)
+        space(column, 28)
 
-        val headline = when (screen) {
-            Screen.WELCOME -> "Code without limits."
-            Screen.PERMISSIONS -> "Make it yours."
-            Screen.PREPARING -> preparationTitle
-            Screen.CONNECTING -> "Almost there."
-            Screen.FAILED -> "Let's get you back on track."
-        }
-        column.addView(text(headline, 30f, titleColor, true).apply {
+        headline = text(titleFor(presentation), TypeRole.HERO, titleColor, true).apply {
+            isAccessibilityHeading = true
+            isFocusable = true
             setLineSpacing(dp(2).toFloat(), 1f)
-        })
-        space(column, 14)
-        val description = when (screen) {
-            Screen.WELCOME -> "Your own AI-powered development workspace, right on your phone."
-            Screen.PERMISSIONS -> "Choose how OpenCodie can work with your device. You can keep coding without shared-file access."
-            Screen.PREPARING -> "We're setting up the tools your workspace needs. This can take longer the first time."
-            Screen.CONNECTING -> "Your tools are ready. We're securely connecting the coding interface."
-            Screen.FAILED -> "Your workspace didn't start. You can try again or inspect the diagnostics."
-        }
-        column.addView(text(description, 15f, secondaryColor).apply {
+        }.also { column.addView(it) }
+        space(column, 12)
+        description = text(descriptionFor(presentation), TypeRole.BODY, secondaryColor).apply {
             setLineSpacing(dp(3).toFloat(), 1f)
-        })
+        }.also { column.addView(it) }
+
+        space(column, 16)
+        noticeView = text("", TypeRole.SUPPORT, noticeColor).apply {
+            background = rounded(surfaceColor, dp(12), borderColor)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            visibility = View.GONE
+        }.also { column.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+        latestNotice?.let {
+            noticeView?.text = it
+            noticeView?.visibility = View.VISIBLE
+        }
 
         when (screen) {
             Screen.PERMISSIONS -> {
-                space(column, 28)
-                permissionItem(
-                    column, "Shared device files",
-                    "Optional. Read and save projects outside OpenCodie's private workspace.",
-                    if (storageGranted) "Allowed" else "Allow",
-                    storageGranted, actions::requestStorage,
-                )
+                space(column, 18)
+                storageButton = permissionItem(column,
+                    context.getString(R.string.onboarding_storage_title),
+                    context.getString(R.string.onboarding_storage_description),
+                    actions::requestStorage)
                 space(column, 12)
-                permissionItem(
-                    column, "Notifications",
-                    "Show status while your local coding server runs.",
-                    if (notificationsGranted) "Allowed" else "Allow",
-                    notificationsGranted, actions::requestNotifications,
-                )
+                notificationsButton = permissionItem(column,
+                    context.getString(R.string.onboarding_notification_title),
+                    context.getString(R.string.onboarding_notification_description),
+                    actions::requestNotifications)
             }
             Screen.PREPARING, Screen.CONNECTING -> {
-                space(column, 30)
+                space(column, 22)
                 val state = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -144,38 +193,77 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
                 val spinner = ProgressBar(context, null, android.R.attr.progressBarStyleSmall).apply {
                     isIndeterminate = true
                     indeterminateTintList = ColorStateList.valueOf(accentColor)
-                    contentDescription = "Workspace preparation in progress"
+                    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
                 }
                 state.addView(spinner, LinearLayout.LayoutParams(dp(26), dp(26)))
-                val phaseText = if (screen == Screen.CONNECTING) "Connecting to OpenCode" else "Setting up securely"
-                state.addView(text(phaseText, 14f, titleColor, true).apply {
-                    setPadding(dp(14), 0, 0, 0)
+                state.addView(text(context.getString(
+                    if (screen == Screen.CONNECTING) R.string.onboarding_connecting_progress
+                    else R.string.onboarding_preparing_progress,
+                ), TypeRole.LABEL, titleColor, true).apply {
+                    setPaddingRelative(dp(14), 0, 0, 0)
                 })
                 column.addView(state)
             }
             else -> Unit
         }
 
-        column.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f).apply {
-            height = dp(32)
-        })
+        space(column, 36)
         when (screen) {
-            Screen.WELCOME -> primary(column, "Get started", actions::getStarted)
+            Screen.WELCOME -> primary(column, context.getString(R.string.onboarding_get_started), actions::getStarted)
             Screen.PERMISSIONS -> {
-                primary(column, if (!storageGranted && !notificationsGranted) "Not now, continue" else "Continue to workspace", actions::continueToWorkspace)
+                primary(column, context.getString(R.string.onboarding_continue), actions::continueToWorkspace)
                 space(column, 12)
-                column.addView(text("Permissions can be changed later in Android Settings.", 12f, secondaryColor)
-                    .apply { gravity = Gravity.CENTER })
+                column.addView(text(context.getString(R.string.onboarding_settings_note),
+                    TypeRole.CAPTION, secondaryColor).apply { gravity = Gravity.CENTER })
             }
             Screen.FAILED -> {
-                primary(column, "Try again", actions::retry)
+                primary(column, context.getString(R.string.onboarding_retry), actions::retry)
                 space(column, 12)
-                secondary(column, "View diagnostics", actions::diagnostics)
+                secondary(column, context.getString(R.string.onboarding_diagnostics), actions::diagnostics)
             }
             Screen.PREPARING, Screen.CONNECTING -> {
-                column.addView(text("Your files and existing work stay on your device.", 12f, secondaryColor)
-                    .apply { gravity = Gravity.CENTER })
+                column.addView(text(context.getString(R.string.onboarding_local_note),
+                    TypeRole.CAPTION, secondaryColor).apply { gravity = Gravity.CENTER })
             }
+        }
+        refreshDynamic(presentation)
+        headline?.post { if (isAttachedToWindow && previousScreen == screen) headline?.requestFocus() }
+    }
+
+    private fun titleFor(p: Presentation): String = when (p.screen) {
+        Screen.WELCOME -> context.getString(R.string.onboarding_welcome_headline)
+        Screen.PERMISSIONS -> context.getString(R.string.onboarding_permissions_headline)
+        Screen.PREPARING -> p.title
+        Screen.CONNECTING -> context.getString(R.string.onboarding_connecting_headline)
+        Screen.FAILED -> context.getString(R.string.onboarding_failure_headline)
+    }
+
+    private fun descriptionFor(p: Presentation): String = p.failureMessage ?: context.getString(when (p.screen) {
+        Screen.WELCOME -> R.string.onboarding_welcome_description
+        Screen.PERMISSIONS -> R.string.onboarding_permissions_description
+        Screen.PREPARING -> R.string.onboarding_preparing_description
+        Screen.CONNECTING -> R.string.onboarding_connecting_description
+        Screen.FAILED -> R.string.onboarding_failure_description
+    })
+
+    private fun refreshDynamic(p: Presentation) {
+        headline?.text = titleFor(p)
+        description?.text = descriptionFor(p)
+        storageButton?.apply {
+            text = context.getString(when {
+                p.storageLinksReady -> R.string.onboarding_allowed
+                p.storageGranted && p.storageSetupFailed -> R.string.onboarding_retry_setup
+                p.storageGranted -> R.string.onboarding_connect_files
+                else -> R.string.onboarding_allow
+            })
+            isEnabled = !p.storageLinksReady
+            contentDescription = context.getString(R.string.onboarding_storage_action, text)
+        }
+        notificationsButton?.apply {
+            text = context.getString(if (p.notificationsGranted)
+                R.string.onboarding_allowed else R.string.onboarding_allow)
+            isEnabled = !p.notificationsGranted
+            contentDescription = context.getString(R.string.onboarding_notifications_action, text)
         }
     }
 
@@ -183,10 +271,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         parent: LinearLayout,
         title: String,
         description: String,
-        actionLabel: String,
-        granted: Boolean,
         action: () -> Unit,
-    ) {
+    ): Button {
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(surfaceColor, dp(16), borderColor)
@@ -196,68 +282,68 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(text(title, 16f, titleColor, true), LinearLayout.LayoutParams(0, -2, 1f))
-        val control = text(actionLabel, 13f, if (granted) secondaryColor else accentColor, true).apply {
-            gravity = Gravity.CENTER
-            minimumHeight = dp(48)
-            minimumWidth = dp(64)
-            contentDescription = if (granted) "$title allowed" else "Allow $title"
-            isEnabled = !granted
-            isClickable = !granted
-            isFocusable = !granted
-            if (!granted) {
-                background = RippleDrawable(ColorStateList.valueOf(0x22B9A4FF), rounded(0x302B41, dp(12)), null)
-                setOnClickListener { action() }
-            }
+        row.addView(text(title, TypeRole.ACTION, titleColor, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        val control = Button(context).apply {
+            textSize = TypeRole.SUPPORT.sp
+            isAllCaps = false
+            minHeight = dp(48)
+            minWidth = dp(72)
+            setTextColor(accentColor)
+            background = RippleDrawable(ColorStateList.valueOf(0x22B9A4FF),
+                rounded(surfaceColor, dp(12), borderColor), null)
+            setOnClickListener { action() }
         }
         row.addView(control)
         box.addView(row)
         space(box, 4)
-        box.addView(text(description, 13f, secondaryColor))
+        box.addView(text(description, TypeRole.SUPPORT, secondaryColor))
         parent.addView(box)
+        return control
     }
 
-    private fun mark(size: Int): View {
-        return TextView(context).apply {
-            text = ">_"
-            textSize = if (size > dp(50)) 29f else 20f
-            typeface = Typeface.create("monospace", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setTextColor(accentColor)
-            background = rounded(0x292338, dp(16))
-            contentDescription = "OpenCodie"
-            layoutParams = LinearLayout.LayoutParams(size, size)
-        }
+    private fun mark(size: Int): View = TextView(context).apply {
+        text = ">_"
+        textSize = if (size > dp(50)) 29f else 20f
+        typeface = Typeface.create("monospace", Typeface.BOLD)
+        gravity = Gravity.CENTER
+        setTextColor(accentColor)
+        background = rounded(surfaceColor, dp(16))
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        layoutParams = LinearLayout.LayoutParams(size, size)
     }
 
     private fun primary(parent: LinearLayout, label: String, action: () -> Unit) {
-        val button = text(label, 16f, backgroundColor, true).apply {
-            gravity = Gravity.CENTER
+        val button = Button(context).apply {
+            text = label
+            textSize = TypeRole.ACTION.sp
+            isAllCaps = false
             minHeight = dp(54)
-            isClickable = true
-            isFocusable = true
+            setTextColor(buttonTextColor)
             background = RippleDrawable(ColorStateList.valueOf(0x33000000),
                 rounded(accentColor, dp(14)), null)
             setOnClickListener { action() }
         }
-        parent.addView(button, LinearLayout.LayoutParams(-1, dp(54)))
+        parent.addView(button, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun secondary(parent: LinearLayout, label: String, action: () -> Unit) {
-        val button = text(label, 14f, accentColor, true).apply {
-            gravity = Gravity.CENTER
+        val button = Button(context).apply {
+            text = label
+            textSize = TypeRole.LABEL.sp
+            isAllCaps = false
             minHeight = dp(48)
-            isClickable = true
-            isFocusable = true
+            setTextColor(accentColor)
+            background = rounded(surfaceColor, dp(14), borderColor)
             setOnClickListener { action() }
         }
-        parent.addView(button, LinearLayout.LayoutParams(-1, dp(48)))
+        parent.addView(button, LinearLayout.LayoutParams(-1, -2))
     }
 
-    private fun text(value: String, size: Float, color: Int, bold: Boolean = false): TextView =
+    private fun text(value: String, role: TypeRole, color: Int, bold: Boolean = false): TextView =
         TextView(context).apply {
             text = value
-            textSize = size
+            textSize = role.sp
             setTextColor(color)
             if (bold) setTypeface(Typeface.DEFAULT, Typeface.BOLD)
             includeFontPadding = true
