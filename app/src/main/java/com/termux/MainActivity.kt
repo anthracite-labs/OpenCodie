@@ -300,9 +300,17 @@ class MainActivity : Activity() {
             screen = screen,
             preparationTitle = OnboardingState.preparationTitle(OpenCodeHost.status),
             storageGranted = hasStoragePermission(),
-            storageLinksReady = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-                .getBoolean("storage_links_ready", false),
+            storageLinksReady = hasStoragePermission() &&
+                getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
+                    .getBoolean("storage_links_ready", false),
             storageSetupFailed = storageSetupFailed,
+            failureMessage = when {
+                OpenCodeHost.error != null -> getString(
+                    R.string.failed, "[${RuntimeHealth.failureCode(OpenCodeHost.error!!)}] ${OpenCodeHost.error}",
+                )
+                webPageFailed -> getString(R.string.onboarding_web_failure)
+                else -> null
+            },
             notificationsGranted = Build.VERSION.SDK_INT < 33 ||
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         )
@@ -342,6 +350,10 @@ class MainActivity : Activity() {
                             view.url != url
                         ) return@post
                         webUiReady = validSession
+                        if (!validSession) {
+                            webPageFailed = true
+                            show(getString(R.string.onboarding_web_failure))
+                        }
                         updateOnboarding()
                     }
                 }.apply { isDaemon = true }.start()
@@ -368,6 +380,7 @@ class MainActivity : Activity() {
             status.text = getString(R.string.reconnecting)
             webPageFailed = true
             webUiReady = false
+            show(getString(R.string.onboarding_web_failure))
             updateOnboarding()
             // An old WebView load may fail after a server restart; allow a new
             // session check without replaying any consumed pairing URL.
@@ -435,6 +448,9 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) show(getString(R.string.onboarding_notification_denied))
             updateOnboarding()
             return
         }
@@ -545,6 +561,19 @@ class MainActivity : Activity() {
                     .putBoolean("storage_links_ready", false).apply()
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
                 show(getString(R.string.onboarding_storage_failed))
+                handler.post {
+                    if (!isDestroyed && !isFinishing && firstRun == FirstRun.CONTINUE) {
+                        AlertDialog.Builder(this)
+                            .setTitle(R.string.onboarding_storage_title)
+                            .setMessage(R.string.onboarding_storage_failed)
+                            .setPositiveButton(R.string.onboarding_retry_setup) { _, _ ->
+                                if (hasStoragePermission()) setupStorageLinks()
+                                else requestStorageAccess()
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                }
             } finally {
                 storageSetupStarted.set(false)
                 handler.post { if (!isDestroyed && !isFinishing) updateOnboarding() }
