@@ -18,6 +18,9 @@ import java.security.SecureRandom
  * One supervisor thread owns the process: it starts the server, publishes a
  * pairing link when ready, and restarts the server with backoff if it exits.
  */
+/** Raised only after the existing bounded local server readiness probe expires. */
+internal class OpenCodeReadinessTimedOut(message: String) : IllegalStateException(message)
+
 object OpenCodeHost {
     const val HOST = "127.0.0.1"
     const val PORT = 4096
@@ -140,7 +143,8 @@ object OpenCodeHost {
                 onStage = { startup.advance(it) },
             )
         } catch (e: Exception) {
-            fail("Could not prepare the Termux runtime", e)
+            fail(if (e is RuntimeSetupTimedOut) "Termux package setup timed out"
+                else "Could not prepare the Termux runtime", e)
             return
         }
 
@@ -165,7 +169,8 @@ object OpenCodeHost {
                 Log.w(TAG, "OpenCode exited with $code")
                 status = "OpenCode stopped (exit $code), restarting"
             } catch (e: Exception) {
-                if (!stopping) fail("OpenCode stopped", e)
+                if (!stopping) fail(if (e is OpenCodeReadinessTimedOut)
+                    "OpenCode server readiness timed out" else "OpenCode stopped", e)
             } finally {
                 // A failed readiness/pairing attempt must not leave a server
                 // holding the loopback port when the supervisor retries.
@@ -233,7 +238,7 @@ object OpenCodeHost {
             // 500ms for ~10s, then 1s to cut wakeups during slow bootstrap.
             Thread.sleep(if (attempts < 20) 500 else 1_000)
         }
-        throw IllegalStateException("OpenCode did not become ready:\n${log()}")
+        throw OpenCodeReadinessTimedOut("OpenCode did not become ready:\n${log()}")
     }
 
     /**
