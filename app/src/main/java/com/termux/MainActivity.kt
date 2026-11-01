@@ -546,69 +546,115 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * All failures hide the authenticated workspace until a new session is verified.
+     * Temporary failures re-pair on bounded backoff; exhausted retries stay actionable.
+     */
+    private fun recordWebFailure(temporary: Boolean, message: String) {
+        if (webUiReady) {
+            restoredWorkspaceUrl = webView.url?.takeIf {
+                OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            }
+        }
+        webUiReady = false
+        activeLoadFailed = true
+        observedServerPairing = null
+        webFailureReason = message
+        webRetryAttempts++
+        webPageFailed = !temporary || !WebRecoveryPolicy.canRetry(webRetryAttempts)
+        nextPairingAttemptAtMs = SystemClock.elapsedRealtime() +
+            WebRecoveryPolicy.delayMs(webRetryAttempts)
+        if (webPageFailed) show(message)
+        updateOnboarding()
+    }
+
     private val client = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (view !== webView) return true
             val url = request.url
-            if (url.scheme == "http" && url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
-            openExternally(url)
+            if (url.scheme == "http" && url.host == OpenCodeHost.HOST &&
+                url.port == OpenCodeHost.PORT
+            ) return false
+            if (request.isForMainFrame) openExternally(url)
             return true
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            // A completed navigation does not establish an authenticated session.
-            if (!webPageFailed && OnboardingState.isWorkspaceUrl(
-                    url, OpenCodeHost.HOST, OpenCodeHost.PORT,
-                )
-            ) {
-                val pairingAtCheck = OpenCodeHost.pairingUrl
-                val cookies = CookieManager.getInstance().getCookie(url).orEmpty()
-                Thread {
-                    val validSession = runCatching {
-                        OpenCodeHost.hasValidWebSession(cookies)
-                    }.getOrDefault(false)
-                    handler.post {
-                        if (isDestroyed || isFinishing || webPageFailed ||
-                            pairingAtCheck == null || pairingAtCheck != OpenCodeHost.pairingUrl ||
-                            view.url != url
-                        ) return@post
-                        webUiReady = validSession
-                        if (validSession) OpenCodeHost.startup.advance(StartupEvent.WEBVIEW_READY)
-                        if (!validSession) {
-                            webPageFailed = true
-                            show(getString(R.string.onboarding_web_failure))
+            if (view !== webView || activeLoadFailed || webPageFailed ||
+                !OnboardingState.isWorkspaceUrl(url, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            ) return
+            val pairingAtCheck = OpenCodeHost.pairingUrl
+            val cookies = CookieManager.getInstance().getCookie(url).orEmpty()
+            Thread {
+                val result = OpenCodeHost.verifyWebSession(cookies)
+                handler.post {
+                    if (isDestroyed || isFinishing || view !== webView || activeLoadFailed ||
+                        pairingAtCheck == null || pairingAtCheck != OpenCodeHost.pairingUrl ||
+                        view.url != url
+                    ) return@post
+                    when (result) {
+                        SessionValidation.VALID -> {
+                            webUiReady = true
+                            webRetryAttempts = 0
+                            webPageFailed = false
+                            webFailureReason = null
+                            OpenCodeHost.startup.advance(StartupEvent.WEBVIEW_READY)
+                            updateOnboarding()
                         }
-                        updateOnboarding()
+                        SessionValidation.EXPIRED ->
+                            recordWebFailure(true, getString(R.string.onboarding_session_expired))
+                        SessionValidation.TRANSIENT ->
+                            recordWebFailure(true, getString(R.string.onboarding_web_failure))
                     }
-                }.apply { isDaemon = true }.start()
-                Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
-            }
+                }
+            }.apply { isDaemon = true }.start()
+            Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
         }
 
         override fun onReceivedHttpError(
             view: WebView, request: WebResourceRequest, response: WebResourceResponse,
         ) {
-            if (!request.isForMainFrame || response.statusCode < 400) return
-            webPageFailed = true
-            webUiReady = false
-            observedServerPairing = null
-            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
-            show(getString(R.string.onboarding_http_failure, response.statusCode))
-            updateOnboarding()
+            if (view !== webView || !request.isForMainFrame || response.statusCode < 400 ||
+                activeLoadFailed
+            ) return
+            val code = response.statusCode
+            // A missing project route is a WebUI-level 404, not a broken server.
+            if (code == 404 && webUiReady) return
+            val recoverable = code == 401 || code == 403 ||
+                WebRecoveryPolicy.isRecoverableHttp(code)
+            recordWebFailure(recoverable, getString(R.string.onboarding_http_failure, code))
         }
 
-        /** The supervisor restarts a dead server; keep the user informed meanwhile. */
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (!request.isForMainFrame) return
-            status.visibility = View.VISIBLE
-            status.text = getString(R.string.reconnecting)
-            webPageFailed = true
+            if (view !== webView || !request.isForMainFrame || activeLoadFailed) return
+            recordWebFailure(true, getString(R.string.onboarding_web_failure))
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            if (view !== webView) {
+                disposeWebView(view, rendererGone = true)
+                return true
+            }
+            fileChooser?.onReceiveValue(null)
+            fileChooser = null
+            val now = SystemClock.elapsedRealtime()
+            if (now - rendererCrashWindowMs > 60_000L) {
+                rendererCrashWindowMs = now
+                rendererCrashCount = 0
+            }
+            rendererCrashCount++
+            Log.w("OpenCodieWeb", if (detail.didCrash()) "Renderer crashed" else "Renderer reclaimed")
             webUiReady = false
-            show(getString(R.string.onboarding_web_failure))
-            updateOnboarding()
-            // An old WebView load may fail after a server restart; allow a new
-            // session check without replaying any consumed pairing URL.
-            observedServerPairing = null
-            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
+            disposeWebView(view, rendererGone = true)
+            webView = createWebView()
+            root.addView(webView, 0, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            // After repeated crashes, never reload the same page in an endless loop.
+            if (rendererCrashCount > 3) {
+                recordWebFailure(false, getString(R.string.onboarding_renderer_failed))
+            } else {
+                recordWebFailure(true, getString(R.string.onboarding_renderer_restarting))
+            }
+            return true
         }
     }
 
