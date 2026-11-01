@@ -1,0 +1,48 @@
+name: Rollback
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: 'Existing release tag holding the known-good OpenCodie.apk'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Republish known-good APK as rollback release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch known-good APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p rollback-apk
+          gh release download "$SOURCE_TAG" \
+            --pattern 'OpenCodie.apk' --dir rollback-apk
+          APK=rollback-apk/OpenCodie.apk
+          test -s "$APK"
+          bytes="$(stat -c%s "$APK")"
+          echo "Rollback APK size: $bytes bytes"
+          ls -lh "$APK"
+          sha256sum "$APK"
+      - name: Publish rollback release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          set -euo pipefail
+          APK=rollback-apk/OpenCodie.apk
+          test -s "$APK"
+          tag="rollback-${SOURCE_TAG}-build.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" \
+            "$APK#OpenCodie.apk" --target "$GITHUB_SHA" \
+            --title "Rollback to $SOURCE_TAG (build $GITHUB_RUN_NUMBER)" \
+            --prerelease --generate-notes

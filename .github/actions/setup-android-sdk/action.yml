@@ -1,0 +1,19 @@
+name: Setup pinned Android SDK
+description: Install the pinned Android platform and build-tools via sdkmanager.
+inputs:
+  packages:
+    description: sdkmanager packages to install
+    required: false
+    default: 'platforms;android-37.0 build-tools;37.0.0'
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Android SDK
+      shell: bash
+      run: |
+        set -euo pipefail
+        SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        test -x "$SDKMANAGER"
+        read -r -a PKGS <<< "${{ inputs.packages }}"
+        "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install "${PKGS[@]}"
+        test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"

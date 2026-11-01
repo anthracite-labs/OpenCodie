@@ -122,22 +122,51 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Install pinned Android SDK for unit tests
-        run: |
-          set -euo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          test -x "$SDKMANAGER"
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;37.0.0'
-          test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
+      - name: Install pinned Android SDK
+        uses: ./.github/actions/setup-android-sdk
+        with:
+          packages: 'platforms;android-37.0 build-tools;37.0.0'
       - name: Run unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Run Python release-contract tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
+  lint:
+    name: Android lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install pinned Android SDK
+        uses: ./.github/actions/setup-android-sdk
+        with:
+          packages: 'platforms;android-37.0 build-tools;37.0.0'
+      - name: Run Android lint
+        run: ./gradlew --no-daemon :app:lintDebug
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail_on_severity: high
+
   apk:
     name: Assemble, verify and optionally release APK
     runs-on: ubuntu-24.04
-    needs: [runtime, unit-tests]
+    needs: [runtime, unit-tests, lint]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -145,13 +174,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install pinned stable Android SDK
+      - name: Install pinned Android SDK
+        uses: ./.github/actions/setup-android-sdk
+        with:
+          packages: 'platforms;android-37.0 build-tools;37.0.0'
+      - name: Check apksigner
         run: |
           set -euo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          test -x "$SDKMANAGER"
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-37.0' 'build-tools;37.0.0'
-          test -s "$ANDROID_HOME/platforms/android-37.0/android.jar"
           test -x "$ANDROID_HOME/build-tools/37.0.0/apksigner"
       - uses: actions/download-artifact@v4
         with:
@@ -208,14 +237,17 @@ jobs:
           else
             ./gradlew --no-daemon :app:assembleRelease
           fi
-      - name: Verify package, target SDK and runtime
+      - name: Resolve APK path
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            APK=app/build/outputs/apk/debug/app-debug.apk
+            echo "APK=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
           else
-            APK=app/build/outputs/apk/release/app-release.apk
+            echo "APK=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
           fi
+      - name: Pre-launch checklist — package, SDK and runtime
+        run: |
+          set -euo pipefail
           test -s "$APK"
           BT="$ANDROID_HOME/build-tools/37.0.0"
           "$BT/aapt2" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
@@ -242,6 +274,19 @@ jobs:
           fi
           "$BT/apksigner" verify "$APK"
           sha256sum "$APK"
+      - name: Enforce APK size budget
+        run: |
+          set -euo pipefail
+          # Current release is ~161 MB; budget 210 MB catches runaway runtime growth.
+          max_bytes=220200960
+          bytes="$(stat -c%s "$APK")"
+          echo "APK size: $bytes bytes (budget $max_bytes bytes)"
+          ls -lh "$APK"
+          test "$bytes" -gt 0
+          if [ "$bytes" -gt "$max_bytes" ]; then
+            echo "::error::APK size $bytes exceeds budget $max_bytes bytes"
+            exit 1
+          fi
       - name: Prepare single signed APK
         if: github.event_name != 'pull_request'
         run: |
@@ -256,10 +301,10 @@ jobs:
           path: dist/OpenCodie.apk
           if-no-files-found: error
           retention-days: 14
-  publish:
-    name: Publish raw signed OpenCodie.apk
+  publish-prerelease:
+    name: Publish prerelease OpenCodie.apk
     needs: apk
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -278,17 +323,47 @@ jobs:
           version="${OPENCODE_VERSION#v}"
           APK=dist-apk/OpenCodie.apk
           test -s "$APK"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            test "$GITHUB_REF_NAME" = "v$version" || {
-              echo "::error::Release tag must match OpenCode v$version"; exit 1;
-            }
-            gh release create "$GITHUB_REF_NAME" \
-              "$APK#OpenCodie.apk" --verify-tag --generate-notes
-          else
-            # Direct APK downloads from Releases; Actions artifacts are always ZIPs.
-            tag="v${version}-build.${GITHUB_RUN_NUMBER}"
-            gh release create "$tag" \
-              "$APK#OpenCodie.apk" --target "$GITHUB_SHA" \
-              --title "OpenCodie v$version (build $GITHUB_RUN_NUMBER)" \
-              --prerelease --generate-notes
-          fi
+          # Direct APK downloads from Releases; Actions artifacts are always ZIPs.
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" \
+            "$APK#OpenCodie.apk" --target "$GITHUB_SHA" \
+            --title "OpenCodie v$version (build $GITHUB_RUN_NUMBER)" \
+            --prerelease --generate-notes
+  publish-stable:
+    name: Publish stable OpenCodie.apk
+    needs: apk
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: OpenCodie
+          path: dist-apk
+      - name: Publish verified signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ./runtime.lock
+          version="${OPENCODE_VERSION#v}"
+          APK=dist-apk/OpenCodie.apk
+          test -s "$APK"
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "::error::Release tag must match OpenCode v$version"; exit 1;
+          }
+          gh release create "$GITHUB_REF_NAME" \
+            "$APK#OpenCodie.apk" --verify-tag --generate-notes
+      - name: Post-launch verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Monitor window: the published asset downloads and is intact.
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern 'OpenCodie.apk' --dir "$RUNNER_TEMP/verify-launch"
+          test -s "$RUNNER_TEMP/verify-launch/OpenCodie.apk"
+          sha256sum "$RUNNER_TEMP/verify-launch/OpenCodie.apk"
