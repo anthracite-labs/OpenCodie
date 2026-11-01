@@ -24,7 +24,7 @@ class BuildContractTest(unittest.TestCase):
 
     def test_termux_execution_compatibility(self):
         gradle = read("app/build.gradle.kts")
-        self.assertIn("minSdk = 28", gradle)
+        self.assertIn("minSdk = 29", gradle)
         self.assertIn("targetSdk = 28", gradle)
 
     def test_version_tracks_opencode_runtime_lock(self):
