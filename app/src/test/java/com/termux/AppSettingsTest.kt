@@ -3,7 +3,7 @@ package com.termux
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class SettingsTest {
+class AppSettingsTest {
     private fun state(error: String? = null, storage: Boolean = true) = SettingsState(
         appVersion = "2.2.2",
         serverStatus = "Ready",
@@ -14,14 +14,14 @@ class SettingsTest {
 
     @Test
     fun healthySummaryUsesWordsNotColor() {
-        val lines = Settings.summaryLines(state())
+        val lines = AppSettings.summaryLines(state())
         assertTrue(lines.any { it.contains("Server: Ready") })
         assertTrue(lines.any { it.contains("Storage: granted") })
     }
 
     @Test
     fun errorCarriesCodeAndStorageHonesty() {
-        val lines = Settings.summaryLines(state(error = "OpenCode stopped: boom", storage = false))
+        val lines = AppSettings.summaryLines(state(error = "OpenCode stopped: boom", storage = false))
         assertTrue(lines.any { it.contains("[E_STARTUP]") })
         assertTrue(lines.any { it.contains("not granted (optional)") })
     }

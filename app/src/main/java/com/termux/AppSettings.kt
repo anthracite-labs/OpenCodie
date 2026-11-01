@@ -14,7 +14,7 @@ data class SettingsState(
     val storageGranted: Boolean,
 )
 
-object Settings {
+object AppSettings {
     const val SOURCE_URL = "https://github.com/anthracite-labs/OpenCodie"
 
     fun summaryLines(state: SettingsState): List<String> = listOf(

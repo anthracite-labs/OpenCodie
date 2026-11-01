@@ -685,7 +685,7 @@ class MainActivity : Activity() {
 
     /** Settings & About: version, server, workspace, storage + actions. */
     private fun showSettings() {
-        val lines = Settings.summaryLines(
+        val lines = AppSettings.summaryLines(
             SettingsState(
                 appVersion = BuildConfig.VERSION_NAME,
                 serverStatus = OpenCodeHost.status,
@@ -705,7 +705,7 @@ class MainActivity : Activity() {
             }
             .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
             .setNegativeButton("Licenses") { _, _ ->
-                openExternally(Uri.parse(Settings.SOURCE_URL))
+                openExternally(Uri.parse(AppSettings.SOURCE_URL))
             }
             .show()
     }
