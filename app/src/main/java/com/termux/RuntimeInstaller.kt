@@ -37,7 +37,12 @@ object RuntimeInstaller {
     private const val READY_FILE = ".opencodie-ready"
     private const val INSTALLING_FILE = ".opencodie-installing"
 
-    fun installIfNeeded(context: Context, log: (String) -> Unit) {
+    fun installIfNeeded(
+        context: Context,
+        log: (String) -> Unit,
+        onStage: (StartupEvent) -> Unit = {},
+    ) {
+        onStage(StartupEvent.VERIFYING_RUNTIME)
         val files = context.filesDir
         val prefix = File(files, "usr")
         val staging = File(files, "usr-staging")
@@ -59,15 +64,19 @@ object RuntimeInstaller {
                 if (prefix.exists()) check(prefix.delete()) { "Could not clear empty prefix" }
             }
             installing.writeText("$bundled\n")
+            onStage(StartupEvent.UNPACKING_RUNTIME)
             bootstrap(context, prefix, staging, log)
             ensureDirectories(prefix)
             selectDefaultMirror(prefix)
+            onStage(StartupEvent.CONFIGURING_PACKAGES)
             runSecondStage(prefix, log)
             writeOpenCodeConfig(log)
+            onStage(StartupEvent.VERIFYING_INSTALL)
             verifyInstalledExecutables(prefix)
             writeVersion(prefix, bundled)
             writeMarker(ready, bundled)
             installing.delete()
+            onStage(StartupEvent.RUNTIME_READY)
             log("Termux runtime $bundled ready")
             return
         }
@@ -77,6 +86,7 @@ object RuntimeInstaller {
         recoverUpgrade(files, prefix, installed == bundled, log)
         if (installed != bundled) {
             log("Upgrading OpenCode $installed -> $bundled")
+            onStage(StartupEvent.UNPACKING_RUNTIME)
             upgrade(context, prefix, files)
             // Validate before committing the new version or deleting rollback backups.
             verifyInstalledExecutables(prefix)
@@ -86,7 +96,9 @@ object RuntimeInstaller {
         }
         ensureDirectories(prefix)
         writeOpenCodeConfig(log)
+        onStage(StartupEvent.VERIFYING_INSTALL)
         verifyInstalledExecutables(prefix)
+        onStage(StartupEvent.RUNTIME_READY)
         log("Runtime $bundled ready")
     }
 
