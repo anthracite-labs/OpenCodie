@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Build
 import android.view.ViewGroup
 import android.widget.Button
@@ -22,6 +24,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.hamcrest.CoreMatchers.`is`
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
@@ -233,4 +236,65 @@ class OnboardingAndroidTest {
         }
     }
 
+
+    @Test fun permissionActionsStayInsideCardsAndMeetTouchMinimum() {
+        openPermissions().use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.findViewById<ViewGroup>(android.R.id.content)
+                val minimum = (48 * activity.resources.displayMetrics.density).toInt()
+                for (kind in listOf("storage", "notifications")) {
+                    val card = root.findViewWithTag<ViewGroup>("permission-$kind-card")
+                    val action = root.findViewWithTag<Button>("permission-$kind-action")
+                    assertTrue("$kind action overflows its card",
+                        action.left >= 0 && action.right <= card.width)
+                    assertTrue("$kind touch target is too short", action.height >= minimum)
+                }
+            }
+        }
+    }
+
+    @Test fun startupStatusSpeaksMeaningInsteadOfOnlyGlyphs() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val view = OnboardingView(activity, object : OnboardingView.Actions {
+                    override fun getStarted() {}
+                    override fun requestStorage() {}
+                    override fun requestNotifications() {}
+                    override fun continueToWorkspace() {}
+                    override fun retry() {}
+                    override fun diagnostics() {}
+                })
+                val root = activity.findViewById<ViewGroup>(android.R.id.content)
+                root.addView(view, ViewGroup.LayoutParams(-1, -1))
+                view.show(OnboardingView.Screen.PREPARING,
+                    startup = StartupTimeline.describe(StartupEvent.UNPACKING_RUNTIME))
+                val step = root.findViewWithTag<TextView>("startup-step-0")
+                assertTrue(step.contentDescription.contains(
+                    activity.getString(R.string.onboarding_stage_in_progress)))
+                root.removeView(view)
+            }
+        }
+    }
+
+    @Test fun normalDarkCardLabelsPassWcagAaContrast() {
+        val config = Configuration(app.resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                Configuration.UI_MODE_NIGHT_YES
+        }
+        val dark = app.createConfigurationContext(config)
+        val foreground = dark.getColor(R.color.onboarding_faint)
+        val background = dark.getColor(R.color.onboarding_surface)
+        fun luminance(c: Int): Double {
+            fun channel(v: Int): Double {
+                val x = v / 255.0
+                return if (x <= 0.04045) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channel(Color.red(c)) +
+                0.7152 * channel(Color.green(c)) + 0.0722 * channel(Color.blue(c))
+        }
+        val x = luminance(foreground)
+        val y = luminance(background)
+        val ratio = (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05)
+        assertTrue("Dark faint text contrast is $ratio", ratio >= 4.5)
+    }
 }
