@@ -167,10 +167,20 @@ object OpenCodeHost {
                 val code = started.waitFor()
                 if (stopping) break
                 Log.w(TAG, "OpenCode exited with $code")
-                status = "OpenCode stopped (exit $code), restarting"
+                status = "Retrying OpenCode server"
+                startup.noteServerFailure("OpenCode server exited (code $code)")
             } catch (e: Exception) {
-                if (!stopping) fail(if (e is OpenCodeReadinessTimedOut)
-                    "OpenCode server readiness timed out" else "OpenCode stopped", e)
+                if (!stopping) {
+                    // Server failures are recoverable: the supervisor retries
+                    // automatically. Do not flash the fatal FAILED screen.
+                    val reason = if (e is OpenCodeReadinessTimedOut)
+                        "OpenCode server readiness timed out"
+                    else "OpenCode server stopped unexpectedly"
+                    Log.w(TAG, "$reason (${e.javaClass.simpleName})")
+                    startup.noteServerFailure(reason)
+                    status = "Retrying OpenCode server"
+                    error = null
+                }
             } finally {
                 // A failed readiness/pairing attempt must not leave a server
                 // holding the loopback port when the supervisor retries.
