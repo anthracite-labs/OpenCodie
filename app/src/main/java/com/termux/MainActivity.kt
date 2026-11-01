@@ -256,7 +256,7 @@ class MainActivity : Activity() {
     /** Onboarding is presentation only; the existing service owns execution. */
     private fun updateOnboarding() {
         if (!::onboarding.isInitialized) return
-        if (firstRun == FirstRun.CONTINUE && webUiReady) {
+        if (OnboardingState.canRevealWebView(firstRun == FirstRun.CONTINUE, webUiReady)) {
             onboarding.visibility = View.GONE
             webView.visibility = View.VISIBLE
             status.visibility = View.GONE
@@ -408,8 +408,13 @@ class MainActivity : Activity() {
     private fun maybeRequestBootstrapStorage() {
         if (!resumed || !File(filesDir, ".opencodie-ready").isFile) return
         val preferences = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-        if (!preferences.getBoolean("storage_opt_in", false)) return
-        if (!preferences.getBoolean("storage_prompted", false)) {
+        val optedIn = preferences.getBoolean("storage_opt_in", false)
+        if (!optedIn) return
+        if (OnboardingState.shouldPromptForStorage(
+            runtimeReady = true,
+            optedIn = optedIn,
+            alreadyPrompted = preferences.getBoolean("storage_prompted", false),
+        )) {
             if (preferences.edit().putBoolean("storage_prompted", true).commit()) {
                 requestStorageAccess()
             }
