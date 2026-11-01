@@ -1,0 +1,43 @@
+package com.termux
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** Pure-JVM checks for the health slice; no device, server or Termux files. */
+class RuntimeHealthTest {
+    @Test
+    fun readyMapsToReadyWithoutError() {
+        assertEquals(HealthState.Ready, RuntimeHealth.current("Ready", null))
+    }
+
+    @Test
+    fun waitingAndStartingMapToStages() {
+        assertEquals(HealthState.Waiting, RuntimeHealth.current("Waiting for OpenCode", null))
+        assertEquals(HealthState.Starting, RuntimeHealth.current("Starting OpenCode", null))
+    }
+
+    @Test
+    fun errorAlwaysBeatsStatusWithStableCode() {
+        val state = RuntimeHealth.current("Ready", "OpenCode stopped: boom")
+        assertTrue(state is HealthState.Failed)
+        assertEquals("E_STARTUP", (state as HealthState.Failed).code)
+    }
+
+    @Test
+    fun blankErrorMapsToUnknownCode() {
+        assertEquals("E_UNKNOWN", RuntimeHealth.failureCode(null))
+        assertEquals("E_UNKNOWN", RuntimeHealth.failureCode("   "))
+    }
+
+    @Test
+    fun sanitizeRedactsSecretsButKeepsStages() {
+        val raw = "OPENCODE_PASSWORD=hunter2\nGET /auth/connect/abc123\nAuthorization: Basic b3BlbmNvZGU6eHh4\nstatus=Waiting for OpenCode"
+        val clean = RuntimeHealth.sanitize(raw)
+        assertTrue("hunter2" !in clean)
+        assertTrue("abc123" !in clean)
+        assertTrue("b3BlbmNvZGU6eHh4" !in clean)
+        assertTrue("Waiting for OpenCode" in clean)
+        assertTrue("REDACTED" in clean)
+    }
+}

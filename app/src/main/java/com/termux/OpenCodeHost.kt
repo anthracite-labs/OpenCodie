@@ -237,5 +237,7 @@ object OpenCodeHost {
         error = "$message: ${e.message ?: e.toString()}"
     }
 
+    internal fun sanitizedLog(): String = RuntimeHealth.sanitize(log())
+
     private fun log(): String = synchronized(output) { output.toString() }
 }
