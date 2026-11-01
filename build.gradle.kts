@@ -10,10 +10,10 @@ buildscript {
                 "org.bouncycastle:bcpkix-jdk18on:1.86",
                 "org.bouncycastle:bcutil-jdk18on:1.86",
                 "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21",
-                "org.apache.commons:commons-lang3:3.18.0",
+                "org.apache.commons:commons-lang3:3.21.0",
                 "org.apache.httpcomponents:httpclient:4.5.14",
                 "org.jdom:jdom2:2.0.6.1",
-                "org.bitbucket.b_c:jose4j:0.9.6"
+                "org.bitbucket.b_c:jose4j:0.9.7"
             )
         }
     }
@@ -33,10 +33,10 @@ val forcedVersions = mapOf(
     "org.bouncycastle:bcpkix-jdk18on" to ("1.86" to "CVE-2026-5588 fixed in 1.84"),
     "org.bouncycastle:bcutil-jdk18on" to ("1.86" to "Keep BouncyCastle modules aligned with bcprov/bcpkix 1.86"),
     "org.jetbrains.kotlin:kotlin-gradle-plugin" to ("2.4.21" to "CVE-2026-53914 fixed in 2.4.20-Beta1; use latest stable 2.4.x"),
-    "org.apache.commons:commons-lang3" to ("3.18.0" to "CVE-2025-48924 fixed in 3.18.0"),
+    "org.apache.commons:commons-lang3" to ("3.21.0" to "CVE-2025-48924 fixed in 3.21.0"),
     "org.apache.httpcomponents:httpclient" to ("4.5.14" to "CVE-2020-13956 fixed in 4.5.13"),
     "org.jdom:jdom2" to ("2.0.6.1" to "CVE-2021-33813 fixed in 2.0.6.1"),
-    "org.bitbucket.b_c:jose4j" to ("0.9.6" to "CVE-2024-29371 fixed in 0.9.6")
+    "org.bitbucket.b_c:jose4j" to ("0.9.7" to "CVE-2024-29371 fixed in 0.9.7")
 )
 allprojects {
     configurations.all {
