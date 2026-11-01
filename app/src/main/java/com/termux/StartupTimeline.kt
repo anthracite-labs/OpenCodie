@@ -36,6 +36,14 @@ internal class StartupTimeline {
         }
     }
 
+    /** A crashed/restarted server legitimately returns to the server stage. */
+    @Synchronized fun restartServer() {
+        if (event.ordinal >= StartupEvent.RUNTIME_READY.ordinal) {
+            event = StartupEvent.STARTING_SERVER
+            failure = false
+        }
+    }
+
     @Synchronized fun fail() { failure = true }
 
     @Synchronized fun reset() {
