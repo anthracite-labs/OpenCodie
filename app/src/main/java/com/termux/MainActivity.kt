@@ -72,7 +72,6 @@ class MainActivity : Activity() {
     private var pendingDownload: String? = null
     private var resumed = false
     private var permissionDecision = PermissionDecision()
-    private var restoredPendingRequest = false
 
     // termux-setup-storage broadcasts this action from the app's own Termux process.
     private val storageReceiver = object : BroadcastReceiver() {
@@ -109,11 +108,6 @@ class MainActivity : Activity() {
             val resolved = permissionDecision.focusReturned()
             if (resolved != null) {
                 commitPermissionResolution(resolved)
-            } else if (restoredPendingRequest) {
-                // Activity recreation may occur while the OS owns the dialog.
-                // Only finish here when Android has actually returned focus.
-                restoredPendingRequest = false
-                permissionDecision.pending?.let { finishPermissionRequest(it) }
             }
             // A grant can also change while Settings/OS UI is open without
             // an active request, such as after an explicit Cancel.
@@ -177,8 +171,10 @@ class MainActivity : Activity() {
         pendingDownload = savedInstanceState?.getString("pending_download_url")
         val restoredKind = savedInstanceState?.getString("pending_permission")
             ?.let { runCatching { PermissionKind.valueOf(it) }.getOrNull() }
-        permissionDecision = PermissionDecision(restoredKind)
-        restoredPendingRequest = restoredKind != null
+        permissionDecision = PermissionDecision(
+            restoredKind,
+            savedInstanceState?.getBoolean("pending_permission_focus_lost") == true,
+        )
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
         val onboardingPrefs = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
@@ -1001,7 +997,10 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("pending_download_url", pendingDownload)
         outState.putString("first_run_step", firstRun.name)
-        permissionDecision.pending?.let { outState.putString("pending_permission", it.name) }
+        permissionDecision.pending?.let {
+            outState.putString("pending_permission", it.name)
+            outState.putBoolean("pending_permission_focus_lost", permissionDecision.hadFocusLoss)
+        }
         super.onSaveInstanceState(outState)
     }
 
