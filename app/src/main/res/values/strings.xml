@@ -49,6 +49,7 @@
     <string name="onboarding_notification_channel">OpenCode server</string>
     <string name="onboarding_notification_settings_missing">Android notification settings are unavailable on this device.</string>
     <string name="onboarding_requesting">Requesting…</string>
+    <string name="onboarding_cancel_request">Cancel request</string>
     <string name="onboarding_not_enabled">Not enabled</string>
     <string name="onboarding_not_configured">Not configured</string>
     <string name="onboarding_change_access">Change access</string>
