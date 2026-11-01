@@ -939,7 +939,7 @@ class MainActivity : Activity() {
             getString(R.string.onboarding_storage_failed)
         } else if (webPageFailed) {
             getString(R.string.onboarding_web_failure)
-        } else return
+        } else OpenCodeHost.startup.snapshot().lastFailure ?: return
         val code = RuntimeHealth.failureCode(error)
         val details = RuntimeHealth.sanitize("[$code] $error\n\n${OpenCodeHost.sanitizedLog()}")
         AlertDialog.Builder(this)
