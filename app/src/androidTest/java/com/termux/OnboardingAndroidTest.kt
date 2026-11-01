@@ -27,6 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -34,8 +35,8 @@ import org.junit.runner.RunWith
  * Connected Android regression tests. Run with a dedicated English-locale DEBUG
  * install (not production data). Notification-dialog tests require a clean install
  * and are run individually: the system displays the first legacy-target prompt
- * only once per newly installed package. CI compiles this suite, but does not run
- * it without an emulator/connected physical device.
+ * only once per newly installed package. CI runs the connected suite on an emulator;
+ * first-run OS prompt cases still need separately reset installs for full coverage.
  */
 @RunWith(AndroidJUnit4::class)
 class OnboardingAndroidTest {
@@ -48,6 +49,33 @@ class OnboardingAndroidTest {
         app.getSharedPreferences("opencodie_permissions", Context.MODE_PRIVATE)
             .edit().putBoolean("notifications_attempted", false)
             .putBoolean("storage_attempted", false).commit()
+        // A dismissed legacy-target POST_NOTIFICATIONS prompt can return on the
+        // next Activity launch while the channel exists and permission is not
+        // decided. That pauses MainActivity and makes *every* Espresso selector
+        // fail with NoActivityResumedException. Treat the permission as
+        // explicitly denied in the test sandbox only; do not alter app behavior.
+        settleNotificationPromptForNextLaunch()
+    }
+
+    @After fun restoreStableNotificationTestState() {
+        // The first-install prompt test dismisses the dialog via Back; without
+        // this cleanup Android can show it again during the next test.
+        settleNotificationPromptForNextLaunch()
+    }
+
+    private fun settleNotificationPromptForNextLaunch() {
+        if (Build.VERSION.SDK_INT < 33 ||
+            app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_DENIED ||
+            app.getSystemService(NotificationManager::class.java)
+                .getNotificationChannel(OpenCodeService.CHANNEL_ID) == null
+        ) return
+        val result = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            .executeShellCommand("pm set-permission-flags ${app.packageName} " +
+                "android.permission.POST_NOTIFICATIONS user-set")
+        assertTrue("Unable to settle Android's pending notification prompt: $result",
+            !result.contains("Error", ignoreCase = true) &&
+                !result.contains("Exception", ignoreCase = true))
     }
 
     private fun openPermissions(): ActivityScenario<MainActivity> {
