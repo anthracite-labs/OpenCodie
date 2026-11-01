@@ -12,7 +12,7 @@ class PermissionDecisionTest {
         assertFalse(state.begin(PermissionKind.NOTIFICATIONS))
         assertEquals(PermissionStatus.REQUESTING, state.status(PermissionKind.NOTIFICATIONS, granted = false, everAsked = false))
         state.lostFocus()
-        assertEquals(null, state.focusReturned())
+        assertEquals(PermissionKind.NOTIFICATIONS, state.focusReturned())
         assertEquals(PermissionStatus.NOT_ENABLED, state.status(PermissionKind.NOTIFICATIONS, granted = false, everAsked = true))
     }
 
