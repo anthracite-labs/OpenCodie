@@ -28,6 +28,8 @@ class OpenCodeService : Service() {
                 } catch (_: InterruptedException) {
                     break
                 }
+                // error/pairingUrl carry no secrets by construction (server output
+                // lives only in the capped host log), so no sanitize step here.
                 val text = ActivityCenter.notificationText(OpenCodeHost.status, OpenCodeHost.error)
                 if (text != last) {
                     last = text

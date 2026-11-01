@@ -29,6 +29,13 @@ class ActivityCenterTest {
     }
 
     @Test
+    fun truncatedErrorKeepsCodePrefix() {
+        val text = ActivityCenter.notificationText("Ready", "OpenCode stopped: " + "y".repeat(200))
+        assertTrue(text.startsWith("[E_STARTUP]"))
+        assertEquals(ActivityCenter.MAX_TEXT, text.length)
+    }
+
+    @Test
     fun newlinesCollapse() {
         val text = ActivityCenter.notificationText("a\nb", null)
         assertEquals("a b", text)
