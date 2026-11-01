@@ -48,4 +48,22 @@
     <string name="onboarding_not_allowed">Not allowed</string>
     <string name="onboarding_notification_channel">OpenCode server</string>
     <string name="onboarding_notification_settings_missing">Android notification settings are unavailable on this device.</string>
+    <string name="onboarding_requesting">Requesting…</string>
+    <string name="onboarding_not_enabled">Not enabled</string>
+    <string name="onboarding_not_configured">Not configured</string>
+    <string name="onboarding_change_access">Change access</string>
+    <string name="onboarding_step_runtime">Checking runtime</string>
+    <string name="onboarding_step_packages">Preparing developer tools</string>
+    <string name="onboarding_step_server">Starting OpenCode server</string>
+    <string name="onboarding_step_workspace">Connecting to workspace</string>
+    <string name="onboarding_stage_preparing">Preparing local runtime…</string>
+    <string name="onboarding_stage_verifying">Verifying bundled runtime…</string>
+    <string name="onboarding_stage_unpacking">Unpacking Termux runtime…</string>
+    <string name="onboarding_stage_packages">Configuring Termux packages…</string>
+    <string name="onboarding_stage_checking">Verifying installed tools…</string>
+    <string name="onboarding_stage_server">Starting OpenCode server…</string>
+    <string name="onboarding_stage_waiting">Waiting for the local server…</string>
+    <string name="onboarding_stage_connecting">Authenticating the workspace…</string>
+    <string name="onboarding_stage_ready">Workspace ready</string>
+    <string name="onboarding_stage_failed">Stopped during: %1$s</string>
 </resources>
