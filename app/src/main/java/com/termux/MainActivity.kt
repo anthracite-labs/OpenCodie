@@ -304,13 +304,16 @@ class MainActivity : Activity() {
                 getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
                     .getBoolean("storage_links_ready", false),
             storageSetupFailed = storageSetupFailed,
-            failureMessage = when {
-                OpenCodeHost.error != null -> getString(
-                    R.string.failed, "[${RuntimeHealth.failureCode(OpenCodeHost.error!!)}] ${OpenCodeHost.error}",
-                )
-                webPageFailed -> getString(R.string.onboarding_web_failure)
-                else -> null
-            },
+            failureMessage = if (screen == OnboardingView.Screen.FAILED) {
+                val hostError = OpenCodeHost.error
+                when {
+                    hostError != null -> RuntimeHealth.sanitize(
+                        getString(R.string.failed, "[${RuntimeHealth.failureCode(hostError)}] $hostError"),
+                    )
+                    webPageFailed -> getString(R.string.onboarding_web_failure)
+                    else -> null
+                }
+            } else null,
             notificationsGranted = Build.VERSION.SDK_INT < 33 ||
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
         )
@@ -562,7 +565,7 @@ class MainActivity : Activity() {
                 Log.e("OpenCodieStorage", "Could not set up shared storage", e)
                 show(getString(R.string.onboarding_storage_failed))
                 handler.post {
-                    if (!isDestroyed && !isFinishing && firstRun == FirstRun.CONTINUE) {
+                    if (!isDestroyed && !isFinishing && resumed && firstRun == FirstRun.CONTINUE) {
                         AlertDialog.Builder(this)
                             .setTitle(R.string.onboarding_storage_title)
                             .setMessage(R.string.onboarding_storage_failed)
