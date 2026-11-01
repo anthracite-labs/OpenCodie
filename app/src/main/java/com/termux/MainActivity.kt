@@ -672,8 +672,12 @@ class MainActivity : Activity() {
             when {
                 serverPairingLink != null -> {
                     if (serverPairingLink != observedServerPairing &&
+                        !webPageFailed &&
                         SystemClock.elapsedRealtime() >= nextPairingAttemptAtMs
                     ) {
+                        // Invalidate an old page BEFORE the asynchronous session
+                        // selector runs; a restarted host must never expose it.
+                        webUiReady = false
                         observedServerPairing = serverPairingLink
                         openWebUiForServer(serverPairingLink)
                     }
