@@ -237,10 +237,32 @@ class BuildContractTest(unittest.TestCase):
         self.assertIn("private fun hasStoragePermission()", activity)
         self.assertIn("private fun updateWebViewFileAccess()", activity)
         self.assertIn("webView.settings.allowFileAccess = false", activity)
-        self.assertIn("webView.settings.allowContentAccess = hasStoragePermission()", activity)
+        self.assertIn("webView.settings.allowContentAccess = true", activity)
         self.assertIn("onMissing: () -> Unit = {}", activity)
         self.assertIn("updateWebViewFileAccess()", activity)
         self.assertIn("startForResultSafely", activity)
+
+    def test_permission_actions_are_explicit_and_repeatable(self):
+        activity = read("app/src/main/java/com/termux/MainActivity.kt")
+        view = read("app/src/main/java/com/termux/OnboardingView.kt")
+        flow = read("app/src/main/java/com/termux/PermissionFlow.kt")
+        service = read("app/src/main/java/com/termux/OpenCodeService.kt")
+        # Fresh installs do not create the notification channel on Welcome.
+        self.assertIn("PermissionFlow.shouldStartHost(completed)", activity)
+        self.assertIn("NotificationAction.CREATE_CHANNEL", activity)
+        self.assertIn("OpenCodeService.CHANNEL_ID", activity)
+        self.assertIn("NotificationAction.OPEN_SETTINGS", activity)
+        self.assertIn("Settings.ACTION_APP_NOTIFICATION_SETTINGS", activity)
+        # Both permission actions are driven from the native permissions screen.
+        self.assertIn("actions::requestStorage", view)
+        self.assertIn("actions::requestNotifications", view)
+        self.assertIn("PermissionFlow.button(", view)
+        self.assertIn("PermissionButton.NOT_ALLOWED", view)
+        self.assertIn("PermissionButton.ALLOWED", view)
+        self.assertIn("PermissionFlow.shouldReviewRevocation(", activity)
+        self.assertIn("manager.areNotificationsEnabled()", activity)
+        self.assertIn("const val CHANNEL_ID = \"opencode\"", service)
+        self.assertIn("enum class NotificationAction", flow)
 
     def test_loopback_cleartext_only_with_manifest_permissions(self):
         manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()

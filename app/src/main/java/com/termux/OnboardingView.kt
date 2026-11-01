@@ -41,7 +41,9 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         val storageGranted: Boolean,
         val storageLinksReady: Boolean,
         val storageSetupFailed: Boolean,
+        val storageAttempted: Boolean,
         val notificationsGranted: Boolean,
+        val notificationsAttempted: Boolean,
         val failureMessage: String?,
     )
 
@@ -74,7 +76,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         previousScreen = null
         lastPresentation?.let {
             show(it.screen, it.title, it.storageGranted, it.storageLinksReady,
-                it.storageSetupFailed, it.notificationsGranted, it.failureMessage)
+                it.storageSetupFailed, it.storageAttempted, it.notificationsGranted,
+                it.notificationsAttempted, it.failureMessage)
         }
     }
 
@@ -99,11 +102,14 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         storageGranted: Boolean = false,
         storageLinksReady: Boolean = false,
         storageSetupFailed: Boolean = false,
+        storageAttempted: Boolean = false,
         notificationsGranted: Boolean = false,
+        notificationsAttempted: Boolean = false,
         failureMessage: String? = null,
     ) {
         val presentation = Presentation(screen, preparationTitle, storageGranted,
-            storageLinksReady, storageSetupFailed, notificationsGranted, failureMessage)
+            storageLinksReady, storageSetupFailed, storageAttempted, notificationsGranted,
+            notificationsAttempted, failureMessage)
         lastPresentation = presentation
         if (previousScreen == screen) {
             refreshDynamic(presentation)
@@ -250,18 +256,22 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         headline?.text = titleFor(p)
         description?.text = descriptionFor(p)
         storageButton?.apply {
-            text = context.getString(when {
-                p.storageLinksReady -> R.string.onboarding_allowed
-                p.storageGranted && p.storageSetupFailed -> R.string.onboarding_retry_setup
-                p.storageGranted -> R.string.onboarding_connect_files
-                else -> R.string.onboarding_allow
+            text = context.getString(when (PermissionFlow.button(p.storageGranted, p.storageAttempted)) {
+                PermissionButton.ALLOWED -> R.string.onboarding_allowed
+                PermissionButton.NOT_ALLOWED -> R.string.onboarding_not_allowed
+                PermissionButton.GRANT -> R.string.onboarding_grant_access
             })
-            isEnabled = !p.storageLinksReady
+            isEnabled = !p.storageGranted || p.storageSetupFailed
             contentDescription = context.getString(R.string.onboarding_storage_action, text)
         }
         notificationsButton?.apply {
-            text = context.getString(if (p.notificationsGranted)
-                R.string.onboarding_allowed else R.string.onboarding_allow)
+            text = context.getString(when (PermissionFlow.button(
+                p.notificationsGranted, p.notificationsAttempted,
+            )) {
+                PermissionButton.ALLOWED -> R.string.onboarding_allowed
+                PermissionButton.NOT_ALLOWED -> R.string.onboarding_not_allowed
+                PermissionButton.GRANT -> R.string.onboarding_grant_access
+            })
             isEnabled = !p.notificationsGranted
             contentDescription = context.getString(R.string.onboarding_notifications_action, text)
         }

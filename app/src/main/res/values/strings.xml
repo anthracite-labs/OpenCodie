@@ -44,4 +44,8 @@
     <string name="onboarding_storage_failed">Shared files setup failed. Retry setup or view diagnostics.</string>
     <string name="onboarding_storage_connected">Shared files connected.</string>
     <string name="onboarding_notification_denied">Notification permission was not granted. You can enable it in Settings.</string>
+    <string name="onboarding_grant_access">Grant access</string>
+    <string name="onboarding_not_allowed">Not allowed</string>
+    <string name="onboarding_notification_channel">OpenCode server</string>
+    <string name="onboarding_notification_settings_missing">Android notification settings are unavailable on this device.</string>
 </resources>
