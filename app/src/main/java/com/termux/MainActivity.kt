@@ -16,6 +16,7 @@ import android.system.Os
 import android.util.Log
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -96,19 +97,51 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyStatusTheme()
+        webView.settings.textZoom = (resources.configuration.fontScale * 100).toInt()
+    }
+
+    private fun themeColors(): Pair<Int, Int> {
+        val attrs = obtainStyledAttributes(intArrayOf(android.R.attr.colorBackground, android.R.attr.textColorPrimary))
+        try {
+            return attrs.getColor(0, Color.WHITE) to attrs.getColor(1, Color.BLACK)
+        } finally {
+            attrs.recycle()
+        }
+    }
+
+    private fun applyStatusTheme() {
+        if (!::status.isInitialized) return
+        val (bg, fg) = themeColors()
+        status.setBackgroundColor(bg)
+        status.setTextColor(fg)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
+        val density = resources.displayMetrics.density
+        val overlayTopDp = (16 * density).toInt()
+        val overlaySideDp = (16 * density).toInt()
+        val overlayBottomDp = (48 * density).toInt()
+        val statusPad = (16 * density).toInt()
+
         status = TextView(this).apply {
             text = getString(R.string.starting)
             gravity = Gravity.CENTER
-            setPadding(48, 48, 48, 48)
-            setBackgroundColor(Color.WHITE)
+            setPadding(statusPad, statusPad, statusPad, statusPad)
             isClickable = true
             isFocusable = true
+            defaultFocusHighlightEnabled = true
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            // No static contentDescription: live region must announce dynamic
+            // status text; clickable already yields "double-tap to activate".
             setOnClickListener { showDiagnostics() }
         }
+        applyStatusTheme()
         retry = Button(this).apply {
             text = "Retry"
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
@@ -123,6 +156,8 @@ class MainActivity : Activity() {
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             visibility = View.GONE
+            isIndeterminate = false
+            contentDescription = "Loading progress"
         }
         settings = Button(this).apply {
             text = "About"
@@ -151,7 +186,22 @@ class MainActivity : Activity() {
             }
         }
         updateWebViewFileAccess()
-        setContentView(FrameLayout(this).apply {
+        val retryLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+        ).apply { bottomMargin = overlayBottomDp }
+        val projectsLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END,
+        ).apply { topMargin = overlayTopDp; marginEnd = overlaySideDp }
+        val settingsLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.START,
+        ).apply { topMargin = overlayTopDp; marginStart = overlaySideDp }
+        val root = FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             // Status text above its progress bar: stacked, never overlapping.
             addView(
@@ -167,31 +217,32 @@ class MainActivity : Activity() {
                 LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT,
             )
-            addView(
-                retry,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-                ).apply { bottomMargin = 48 },
-            )
-            addView(
-                projects,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP or Gravity.END,
-                ).apply { topMargin = 16; marginEnd = 16 },
-            )
-            addView(
-                settings,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.TOP or Gravity.START,
-                ).apply { topMargin = 16; marginStart = 16 },
-            )
-        })
+            addView(retry, retryLp)
+            addView(projects, projectsLp)
+            addView(settings, settingsLp)
+        }
+        // Keep overlay buttons clear of status/navigation bars and notches.
+        // Framework-only: deprecated getters cover minSdk 29 without androidx.
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            @Suppress("DEPRECATION")
+            val sysTop = insets.systemWindowInsetTop
+            @Suppress("DEPRECATION")
+            val sysBottom = insets.systemWindowInsetBottom
+            @Suppress("DEPRECATION")
+            val sysLeft = insets.systemWindowInsetLeft
+            @Suppress("DEPRECATION")
+            val sysRight = insets.systemWindowInsetRight
+            projectsLp.topMargin = overlayTopDp + sysTop
+            projectsLp.marginEnd = overlaySideDp + sysRight
+            settingsLp.topMargin = overlayTopDp + sysTop
+            settingsLp.marginStart = overlaySideDp + sysLeft
+            retryLp.bottomMargin = overlayBottomDp + sysBottom
+            projects.layoutParams = projectsLp
+            settings.layoutParams = settingsLp
+            retry.layoutParams = retryLp
+            insets
+        }
+        setContentView(root)
 
         startForegroundService(Intent(this, OpenCodeService::class.java))
         requestNotificationPermission()
@@ -482,6 +533,9 @@ class MainActivity : Activity() {
             .setPositiveButton("Open") { _, _ -> openSaved(destination) }
             .setNegativeButton("Close", null)
             .show()
+            .also { dialog ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+            }
     }
 
     private fun openSaved(destination: Uri) {
@@ -612,6 +666,9 @@ class MainActivity : Activity() {
             .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
             .setOnDismissListener { markSeen() }
             .show()
+            .also { dialog ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+            }
     }
 
     /** Project Hub: recent projects with Git branch/dirty badges + validated switch. */
@@ -640,6 +697,10 @@ class MainActivity : Activity() {
                     }
                     .setNegativeButton("Close", null)
                     .show()
+                    .also { dialog ->
+                        dialog.listView?.requestFocus()
+                            ?: dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.requestFocus()
+                    }
             }
         }.apply { isDaemon = true }.start()
     }
@@ -708,6 +769,9 @@ class MainActivity : Activity() {
                 openExternally(Uri.parse(AppSettings.SOURCE_URL))
             }
             .show()
+            .also { dialog ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+            }
     }
 
     /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */
@@ -744,6 +808,9 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Close", null)
             .show()
+            .also { dialog ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+            }
     }
 
     private fun show(message: String) {
