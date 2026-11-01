@@ -21,13 +21,13 @@ class MinimalShellContractTest(unittest.TestCase):
         self.assertNotIn("projectsLp", activity)
         self.assertNotIn("settingsLp", activity)
 
-    def test_no_guided_onboarding_or_native_file_progress_dialogs(self):
+    def test_android_file_picker_download_is_cancellable_and_bounded(self):
         activity = (ANDROID / "MainActivity.kt").read_text()
         self.assertNotIn("maybeShowFirstRun()", activity)
         self.assertNotIn("showSavedDialog(", activity)
         self.assertNotIn("FileTransfer.", activity)
         self.assertIn("Intent.ACTION_CREATE_DOCUMENT", activity)
-        self.assertIn("input.copyTo(output)", activity)
+        self.assertIn("connection.readTimeout", activity)\n        self.assertIn("downloadCancelled.get()", activity)\n        self.assertIn("contentResolver.openOutputStream(destination", activity)
 
     def test_pr28_design_assets_and_ui_slice_modules_are_removed(self):
         self.assertFalse((ROOT / "design-system/opencodie").exists())
