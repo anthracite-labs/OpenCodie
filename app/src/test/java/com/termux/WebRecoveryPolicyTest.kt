@@ -17,6 +17,7 @@ class WebRecoveryPolicyTest {
         assertEquals(SessionValidation.VALID, WebRecoveryPolicy.classifySessionHttp(200))
         assertEquals(SessionValidation.EXPIRED, WebRecoveryPolicy.classifySessionHttp(401))
         assertEquals(SessionValidation.EXPIRED, WebRecoveryPolicy.classifySessionHttp(403))
+        assertEquals(SessionValidation.EXPIRED, WebRecoveryPolicy.classifySessionHttp(302))
         assertEquals(SessionValidation.TRANSIENT, WebRecoveryPolicy.classifySessionHttp(null))
         assertEquals(SessionValidation.TRANSIENT, WebRecoveryPolicy.classifySessionHttp(503))
     }
