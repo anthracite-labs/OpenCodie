@@ -182,4 +182,55 @@ class OnboardingAndroidTest {
                 .check(matches(withText(R.string.onboarding_not_enabled)))
         }
     }
+
+    @Test fun welcomeIntroducesLocalWorkspaceAndOnePrimaryAction() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            onView(withTagValue(`is`("onboarding-workspace-preview")))
+                .check(matches(isDisplayed()))
+            onView(withTagValue(`is`("onboarding-primary-action")))
+                .check(matches(withText(R.string.onboarding_get_started)))
+        }
+    }
+
+    @Test fun permissionCardsKeepOptionalActionsVisible() {
+        openPermissions().use {
+            onView(withTagValue(`is`("permission-storage-card")))
+                .check(matches(isDisplayed()))
+            onView(withTagValue(`is`("permission-notifications-card")))
+                .check(matches(isDisplayed()))
+            onView(withTagValue(`is`("onboarding-primary-action")))
+                .check(matches(withText(R.string.onboarding_continue)))
+        }
+    }
+
+    @Test fun startupStagesAndFailureScreenAreVisibleWithoutServerLaunch() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.findViewById<ViewGroup>(android.R.id.content)
+                val view = OnboardingView(activity, object : OnboardingView.Actions {
+                    override fun getStarted() {}
+                    override fun requestStorage() {}
+                    override fun requestNotifications() {}
+                    override fun continueToWorkspace() {}
+                    override fun retry() {}
+                    override fun diagnostics() {}
+                })
+                root.addView(view, ViewGroup.LayoutParams(-1, -1))
+                view.show(OnboardingView.Screen.PREPARING,
+                    startup = StartupTimeline.describe(StartupEvent.UNPACKING_RUNTIME))
+                assertEquals(true, root.findViewWithTag<TextView>("startup-step-0")
+                    ?.text?.toString()?.startsWith("●"))
+                view.show(OnboardingView.Screen.CONNECTING,
+                    startup = StartupTimeline.describe(StartupEvent.WAITING_FOR_SERVER))
+                assertEquals(true, root.findViewWithTag<TextView>("startup-step-2")
+                    ?.text?.toString()?.startsWith("●"))
+                view.show(OnboardingView.Screen.FAILED,
+                    startup = StartupTimeline.describe(StartupEvent.WAITING_FOR_SERVER).copy(failed = true))
+                assertEquals(true, root.findViewWithTag<ViewGroup>("onboarding-failure-card") != null)
+                assertEquals(true, root.findViewWithTag<Button>("onboarding-retry-action") != null)
+                root.removeView(view)
+            }
+        }
+    }
+
 }
