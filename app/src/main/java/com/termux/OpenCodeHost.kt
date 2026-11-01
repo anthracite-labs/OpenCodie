@@ -273,6 +273,7 @@ object OpenCodeHost {
         if (cookies.isBlank()) return SessionValidation.EXPIRED
         val request = (URL("http://$HOST:$PORT/api/info").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
+            instanceFollowRedirects = false
             connectTimeout = 3_000
             readTimeout = 5_000
             setRequestProperty("Cookie", cookies)
