@@ -1,5 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["github:chrisbanes/skills"],
   "skills": ["./.agents/skills"]
 }
