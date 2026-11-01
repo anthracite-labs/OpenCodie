@@ -13,31 +13,10 @@ import android.os.IBinder
  * background. It owns nothing else: [OpenCodeHost] supervises the process.
  */
 class OpenCodeService : Service() {
-    @Volatile private var watching = false
-
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIFICATION_ID, notification("OpenCode server running"))
+        startForeground(NOTIFICATION_ID, notification())
         OpenCodeHost.start(this)
-        watching = true
-        Thread {
-            var last = ""
-            while (watching) {
-                try {
-                    Thread.sleep(NOTIFICATION_POLL_MS)
-                } catch (_: InterruptedException) {
-                    break
-                }
-                // error/pairingUrl carry no secrets by construction (server output
-                // lives only in the capped host log), so no sanitize step here.
-                val text = ActivityCenter.notificationText(OpenCodeHost.status, OpenCodeHost.error)
-                if (text != last) {
-                    last = text
-                    getSystemService(NotificationManager::class.java)
-                        ?.notify(NOTIFICATION_ID, notification(text))
-                }
-            }
-        }.apply { isDaemon = true }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -50,12 +29,11 @@ class OpenCodeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        watching = false
         OpenCodeHost.stop()
         super.onDestroy()
     }
 
-    private fun notification(text: String): Notification {
+    private fun notification(): Notification {
         getSystemService(NotificationManager::class.java)?.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "OpenCode server", NotificationManager.IMPORTANCE_LOW),
         )
@@ -67,7 +45,7 @@ class OpenCodeService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(text)
+            .setContentText("OpenCode server running")
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentIntent(open)
             .setOngoing(true)
@@ -77,6 +55,5 @@ class OpenCodeService : Service() {
     private companion object {
         const val CHANNEL_ID = "opencode"
         const val NOTIFICATION_ID = 1
-        const val NOTIFICATION_POLL_MS = 2_000L
     }
 }

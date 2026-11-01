@@ -37,8 +37,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
@@ -55,9 +53,6 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var status: TextView
     private lateinit var retry: Button
-    private lateinit var projects: Button
-    private lateinit var progress: ProgressBar
-    private lateinit var settings: Button
     private val handler = Handler(Looper.getMainLooper())
     private var loadedUrl: String? = null
     private var observedServerPairing: String? = null
@@ -128,9 +123,6 @@ class MainActivity : Activity() {
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
 
         val density = resources.displayMetrics.density
-        val overlayTopDp = (16 * density).toInt()
-        val overlaySideDp = (16 * density).toInt()
-        val overlayBottomDp = (48 * density).toInt()
         val statusPad = (16 * density).toInt()
 
         status = TextView(this).apply {
@@ -151,22 +143,6 @@ class MainActivity : Activity() {
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
-        }
-        projects = Button(this).apply {
-            text = "Projects"
-            minimumHeight = (48 * resources.displayMetrics.density).toInt()
-            setOnClickListener { showProjectHub() }
-        }
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            visibility = View.GONE
-            isIndeterminate = false
-            contentDescription = "Loading progress"
-        }
-        settings = Button(this).apply {
-            text = "About"
-            minimumHeight = (48 * resources.displayMetrics.density).toInt()
-            setOnClickListener { showSettings() }
         }
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -194,55 +170,17 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-        ).apply { bottomMargin = overlayBottomDp }
-        val projectsLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END,
-        ).apply { topMargin = overlayTopDp; marginEnd = overlaySideDp }
-        val settingsLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.START,
-        ).apply { topMargin = overlayTopDp; marginStart = overlaySideDp }
+        ).apply { bottomMargin = (48 * density).toInt() }
         val root = FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            // Status text above its progress bar: stacked, never overlapping.
-            addView(
-                LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-                    addView(
-                        progress,
-                        LayoutParams.MATCH_PARENT,
-                        LayoutParams.WRAP_CONTENT,
-                    )
-                },
-                LayoutParams.MATCH_PARENT,
-                LayoutParams.WRAP_CONTENT,
-            )
+            addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             addView(retry, retryLp)
-            addView(projects, projectsLp)
-            addView(settings, settingsLp)
         }
-        // Keep overlay buttons clear of status/navigation bars and notches.
-        // Framework-only: deprecated getters cover minSdk 29 without androidx.
+        // Recovery is the only native overlay; keep it inside system insets.
         root.setOnApplyWindowInsetsListener { _, insets ->
             @Suppress("DEPRECATION")
-            val sysTop = insets.systemWindowInsetTop
-            @Suppress("DEPRECATION")
-            val sysBottom = insets.systemWindowInsetBottom
-            @Suppress("DEPRECATION")
-            val sysLeft = insets.systemWindowInsetLeft
-            @Suppress("DEPRECATION")
-            val sysRight = insets.systemWindowInsetRight
-            projectsLp.topMargin = overlayTopDp + sysTop
-            projectsLp.marginEnd = overlaySideDp + sysRight
-            settingsLp.topMargin = overlayTopDp + sysTop
-            settingsLp.marginStart = overlaySideDp + sysLeft
-            retryLp.bottomMargin = overlayBottomDp + sysBottom
-            projects.layoutParams = projectsLp
-            settings.layoutParams = settingsLp
+            val bottomInset = insets.systemWindowInsetBottom
+            retryLp.bottomMargin = (48 * density).toInt() + bottomInset
             retry.layoutParams = retryLp
             insets
         }
@@ -473,89 +411,25 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Streams the loopback response with progress; dialog offers Open on success. */
+    /** Stream a local download to the Android document picker without a blocking dialog. */
     private fun save(url: String, destination: Uri) {
-        val fullName = URLUtil.guessFileName(url, null, null)
-        val label = FileTransfer.fileLabel(fullName)
-        show(FileTransfer.progressText(0, -1))
-        handler.post {
-            progress.isIndeterminate = true
-            progress.visibility = View.VISIBLE
-        }
+        show(getString(R.string.saving))
         Thread {
             try {
                 val connection = URL(url).openConnection() as HttpURLConnection
                 CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
                 connection.connectTimeout = 10_000
-                val total = connection.contentLengthLong
-                var bytes = 0L
-                var lastPostMs = 0L
                 connection.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
                         checkNotNull(output) { "Could not open $destination" }
-                        val buf = ByteArray(8192)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            output.write(buf, 0, n)
-                            bytes += n
-                            // Coalesce UI posts: fast loopback can copy thousands
-                            // of chunks; the shade only needs ~5 updates/sec.
-                            val nowMs = SystemClock.elapsedRealtime()
-                            if (nowMs - lastPostMs >= 200) {
-                                lastPostMs = nowMs
-                                val snapshot = bytes
-                                handler.post {
-                                    if (total > 0) {
-                                        progress.isIndeterminate = false
-                                        progress.progress = (snapshot * 100 / total).coerceIn(0, 100).toInt()
-                                    }
-                                    status.text = FileTransfer.progressText(snapshot, total)
-                                }
-                            }
-                        }
+                        input.copyTo(output)
                     }
                 }
-                handler.post {
-                    progress.visibility = View.GONE
-                    showSavedDialog(fullName, label, destination)
-                }
+                show(getString(R.string.saved))
             } catch (e: Exception) {
-                handler.post { progress.visibility = View.GONE }
                 show(getString(R.string.download_failed, e.message ?: e.toString()))
             }
         }.apply { isDaemon = true }.start()
-    }
-
-    /** Full filename in the message; truncated chip only on the status line. */
-    private fun showSavedDialog(fullName: String, label: String, destination: Uri) {
-        show(getString(R.string.saved) + ": " + label)
-        // Backgrounded download: toast is enough, don't pop a dialog over
-        // whatever the user is doing now.
-        if (isDestroyed || isFinishing || !resumed) return
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.saved))
-            .setMessage(fullName)
-            .setPositiveButton("Open") { _, _ -> openSaved(destination) }
-            .setNegativeButton("Close", null)
-            .show()
-            .also { dialog ->
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
-            }
-    }
-
-    private fun openSaved(destination: Uri) {
-        try {
-            val type = contentResolver.getType(destination) ?: "*/*"
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(destination, type)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Log.w("OpenCodieSave", "cannot open saved file", e)
-            show("No app can open this file")
-        }
     }
 
     /**
@@ -603,7 +477,6 @@ class MainActivity : Activity() {
         handler.postDelayed({
             if (isDestroyed || isFinishing) return@postDelayed
             maybeRequestBootstrapStorage()
-            maybeShowFirstRun()
             val error = OpenCodeHost.error
             val serverPairingLink = OpenCodeHost.pairingUrl
             when {
@@ -632,176 +505,6 @@ class MainActivity : Activity() {
             refreshHealthPanel()
             poll()
         }, if (loadedUrl == null) POLL_MS else RECONNECT_POLL_MS)
-    }
-
-    /** First run: one welcome dialog per version, after the auto storage prompt. */
-    private fun maybeShowFirstRun() {
-        if (!resumed || isDestroyed || isFinishing) return
-        // Cheapest check first: after the seen version is stored this is ~free
-        // on every poll tick instead of hitting filesDir and TERMUX_HOME 2x/s.
-        val prefs = getSharedPreferences(FirstRun.PREFS, MODE_PRIVATE)
-        val version = BuildConfig.VERSION_NAME
-        if (prefs.getString(FirstRun.SEEN_KEY, null) == version) return
-        if (!File(filesDir, ".opencodie-ready").isFile) return
-        val bootstrap = getSharedPreferences("opencodie_bootstrap", MODE_PRIVATE)
-        if (!bootstrap.getBoolean("storage_prompted", false)) return
-        if (!FirstRun.shouldShow(
-                runtimeReady = true,
-                storagePromptedBefore = true,
-                seenVersion = null,
-                currentVersion = version,
-            )
-        ) return
-        val markSeen = { prefs.edit().putString(FirstRun.SEEN_KEY, version).apply() }
-        val projectsDir = File(Termux.HOME, "projects")
-        val names = projectsDir.list()?.toList() ?: emptyList()
-        val lines = FirstRun.stepLines(
-            FirstRunState(
-                runtimeReady = true,
-                storageGranted = hasStoragePermission(),
-                projectNames = names,
-                seenVersion = null,
-                currentVersion = version,
-            ),
-        )
-        markSeen()
-        AlertDialog.Builder(this)
-            .setTitle("Welcome to OpenCodie")
-            .setMessage(lines.joinToString("\n") + "\n\nProvider sign-in and coding happen in the WebUI.")
-            .setPositiveButton("Continue", null)
-            .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
-            .setOnDismissListener { markSeen() }
-            .show()
-            .also { dialog ->
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
-            }
-    }
-
-    /** Project Hub: recent projects with Git branch/dirty badges + validated switch. */
-    private fun showProjectHub() {
-        Thread {
-            val dir = File(Termux.HOME, "projects")
-            val names = dir.list()
-                ?.filter { File(dir, it).isDirectory && ProjectHub.isValidProjectName(it) }
-                ?: emptyList()
-            val current = OpenCodeHost.currentWorkspaceName()
-            val ordered = ProjectHub.sortForDisplay(names, current)
-            val labels = ordered.map { name ->
-                val mark = if (name == current) "● " else ""
-                mark + name + gitSuffix(File(dir, name))
-            }
-            handler.post {
-                if (isDestroyed || isFinishing) return@post
-                if (ordered.isEmpty()) {
-                    show("No projects yet — create one under ~/projects in the WebUI")
-                    return@post
-                }
-                AlertDialog.Builder(this)
-                    .setTitle("Projects (current: $current)")
-                    .setItems(labels.toTypedArray()) { _, which ->
-                        switchProject(ordered[which])
-                    }
-                    .setNegativeButton("Close", null)
-                    .show()
-                    .also { dialog ->
-                        dialog.listView?.requestFocus()
-                            ?: dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.requestFocus()
-                    }
-            }
-        }.apply { isDaemon = true }.start()
-    }
-
-    private fun gitSuffix(dir: File): String = runCatching {
-        val branch = runGit(dir, "branch", "--show-current").let(ProjectHub::parseBranch)
-            ?: return ""
-        val dirty = runGit(dir, "status", "--porcelain").isNotBlank()
-        " ($branch${if (dirty) " ●" else ""})"
-    }.getOrDefault("")
-
-    private fun runGit(dir: File, vararg args: String): String = try {
-        val proc = ProcessBuilder(listOf("${Termux.PREFIX}/bin/git", "-C", dir.path) + args)
-            .redirectErrorStream(true)
-            .apply {
-                environment().clear()
-                environment().putAll(Termux.environment(android.os.Process.myUid()))
-            }
-            .start()
-        val output = StringBuilder()
-        // Drain while waiting: large porcelain output can fill the OS pipe.
-        val drain = Thread {
-            runCatching {
-                proc.inputStream.bufferedReader().use { reader ->
-                    val buffer = CharArray(4096)
-                    while (true) {
-                        val count = reader.read(buffer)
-                        if (count < 0) break
-                        synchronized(output) {
-                            val remaining = 8192 - output.length
-                            if (remaining > 0) output.append(buffer, 0, minOf(remaining, count))
-                        }
-                    }
-                }
-            }
-        }.apply { isDaemon = true }
-        drain.start()
-        if (!proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-            proc.destroyForcibly()
-            proc.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
-            ""
-        } else {
-            drain.join(500)
-            synchronized(output) { output.toString() }
-        }
-    } catch (e: Exception) {
-        Log.w("OpenCodieHub", "git unavailable for ${dir.name}", e)
-        ""
-    }
-
-    private fun switchProject(name: String) {
-        show("Switching to $name…")
-        Thread {
-            val ok = OpenCodeHost.switchWorkspace(applicationContext, name)
-            handler.post {
-                if (ok) {
-                    // A new server mints fresh pairing links; never reuse the old session.
-                    observedServerPairing = null
-                    loadedUrl = null
-                    show("Switched to $name")
-                } else {
-                    show("Invalid project name: $name")
-                }
-            }
-        }.apply { isDaemon = true }.start()
-    }
-
-    /** Settings & About: version, server, workspace, storage + actions. */
-    private fun showSettings() {
-        val lines = AppSettings.summaryLines(
-            SettingsState(
-                appVersion = BuildConfig.VERSION_NAME,
-                serverStatus = OpenCodeHost.status,
-                serverError = OpenCodeHost.error,
-                workspacePath = File(Termux.HOME, "projects/" + OpenCodeHost.currentWorkspaceName()).path,
-                storageGranted = hasStoragePermission(),
-            ),
-        )
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.app_name))
-            .setMessage(lines.joinToString("\n"))
-            .setPositiveButton("Restart server") { dialog, _ ->
-                // Dismiss first: the status overlay owns restart progress from here.
-                dialog.dismiss()
-                Thread { OpenCodeHost.restart(applicationContext) }.apply { isDaemon = true }.start()
-                show(getString(R.string.reconnecting))
-            }
-            .setNeutralButton("Storage") { _, _ -> requestStorageAccess() }
-            .setNegativeButton("Licenses") { _, _ ->
-                openExternally(Uri.parse(AppSettings.SOURCE_URL))
-            }
-            .show()
-            .also { dialog ->
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
-            }
     }
 
     /** Health slice: explicit retry + sanitized diagnostics, no raw secrets. */

@@ -27,13 +27,6 @@ class EdgeCaseRecoveryContractTest(unittest.TestCase):
         self.assertIn("RuntimeHealth.installStatus(it)", host)
         self.assertNotIn("Log.i(TAG, line)", host)
 
-    def test_git_output_is_drained_before_process_wait(self):
-        activity = read("MainActivity.kt")
-        runner = activity.split("private fun runGit(", 1)[1].split("private fun switchProject(", 1)[0]
-        self.assertIn("drain.start()", runner)
-        self.assertIn("Termux.environment(android.os.Process.myUid())", runner)
-        self.assertLess(runner.index("drain.start()"), runner.index("proc.waitFor("))
-
     def test_pending_download_survives_activity_recreation(self):
         activity = read("MainActivity.kt")
         self.assertIn('savedInstanceState?.getString("pending_download_url")', activity)
