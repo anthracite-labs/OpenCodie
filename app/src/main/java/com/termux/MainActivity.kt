@@ -416,6 +416,7 @@ class MainActivity : Activity() {
             notificationsGranted = hasNotificationAccess(),
             storagePending = permissionDecision.pending == PermissionKind.STORAGE,
             notificationsPending = permissionDecision.pending == PermissionKind.NOTIFICATIONS,
+            permissionsBusy = permissionDecision.pending != null,
             startup = OpenCodeHost.startup.snapshot(),
         )
     }
