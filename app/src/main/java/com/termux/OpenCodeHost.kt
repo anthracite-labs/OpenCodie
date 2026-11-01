@@ -27,6 +27,7 @@ object OpenCodeHost {
     private const val READY_TIMEOUT_MS = 180_000L
     private const val LOG_LIMIT = 8_000
 
+    val startup = StartupTimeline()
     @Volatile var status = "Starting"
     @Volatile var pairingUrl: String? = null
     @Volatile var error: String? = null
@@ -131,8 +132,13 @@ object OpenCodeHost {
         }
     }
     private fun supervise(context: Context) {
+        startup.reset()
         try {
-            RuntimeInstaller.installIfNeeded(context) { status = RuntimeHealth.installStatus(it) }
+            RuntimeInstaller.installIfNeeded(
+                context,
+                log = { status = RuntimeHealth.installStatus(it) },
+                onStage = { startup.advance(it) },
+            )
         } catch (e: Exception) {
             fail("Could not prepare the Termux runtime", e)
             return
@@ -142,13 +148,16 @@ object OpenCodeHost {
         while (!stopping) {
             var started: Process? = null
             try {
+                startup.restartServer()
                 status = "Starting OpenCode"
                 error = null
                 pairingUrl = null
                 started = launch(context)
                 process = started
+                startup.advance(StartupEvent.WAITING_FOR_SERVER)
                 status = "Waiting for OpenCode"
                 pairingUrl = awaitPairing(started)
+                startup.advance(StartupEvent.SERVER_READY)
                 status = "Ready"
                 backoff = 2_000L
                 val code = started.waitFor()
@@ -308,6 +317,7 @@ object OpenCodeHost {
         // Public status and notifications must never include exception data.
         Log.e(TAG, "$message (${e.javaClass.simpleName})")
         status = message
+        startup.fail()
         error = "$message (${e.javaClass.simpleName})"
     }
 
