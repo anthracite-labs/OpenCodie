@@ -1,6 +1,6 @@
 # Android acceptance: permission decisions and live startup
 
-PR #46 adds unit tests, a connected Android instrumentation suite, and a typed startup timeline. CI compiles the Android instrumentation APK and the separate `android-ui-tests.yml` workflow attempts the connected suite on an Android 15 emulator. **A real ARM64 device remains necessary for release acceptance and fidelity validation.**
+PR #46 adds unit tests, a connected Android instrumentation suite, and a typed startup timeline. CI compiles the Android instrumentation APK; connected tests are run manually on physical Android devices. **A real ARM64 device remains necessary for release acceptance and fidelity validation.**
 
 ## Environment
 
@@ -20,7 +20,7 @@ Build and run the Android suite from a checkout with the Android SDK and test de
   -Pandroid.testInstrumentationRunnerArguments.class=com.termux.OnboardingAndroidTest#notificationPendingIsNeutralBeforeUserAnswers
 ```
 
-The main build workflow compiles the connected suite. The `Android UI regression (emulator)` workflow additionally attempts `connectedDebugAndroidTest` on API 35 (x86_64 + ARM64 translation) and uploads a welcome screenshot and test reports. Emulator compatibility must be verified from each PR run; it does not replace real ARM64 testing.
+The main build workflow compiles the instrumentation suite. Run `connectedDebugAndroidTest` on a dedicated physical ARM64 test device and retain the test reports as acceptance evidence.
 
 For each pull request, the build workflow now uploads a **debug-signed** APK artifact named `OpenCodie-PR<PR_NUMBER>-debug` (7-day retention) after APK validation. Download the ZIP from the successful GitHub Actions run. **Debug signing is not production signing**. If your device already has production OpenCodie installed with package `com.termux`, Android may reject installing the test build over it; **do not uninstall or erase the production app without backing up your workspace**. Use a dedicated test device or prepared backup.
 
