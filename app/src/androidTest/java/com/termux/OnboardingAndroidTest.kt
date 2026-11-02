@@ -35,7 +35,7 @@ import org.junit.runner.RunWith
  * Connected Android regression tests. Run with a dedicated English-locale DEBUG
  * install (not production data). Notification-dialog tests require a clean install
  * and are run individually: the system displays the first legacy-target prompt
- * only once per newly installed package. CI runs the connected suite on an emulator;
+ * only once per newly installed package. Run the connected suite on a dedicated physical device;
  * first-run OS prompt cases still need separately reset installs for full coverage.
  */
 @RunWith(AndroidJUnit4::class)
