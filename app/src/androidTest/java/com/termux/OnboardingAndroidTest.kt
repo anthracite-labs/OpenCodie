@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Build
 import android.view.ViewGroup
 import android.widget.Button
@@ -22,8 +24,10 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.hamcrest.CoreMatchers.`is`
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -31,8 +35,8 @@ import org.junit.runner.RunWith
  * Connected Android regression tests. Run with a dedicated English-locale DEBUG
  * install (not production data). Notification-dialog tests require a clean install
  * and are run individually: the system displays the first legacy-target prompt
- * only once per newly installed package. CI compiles this suite, but does not run
- * it without an emulator/connected physical device.
+ * only once per newly installed package. Run the connected suite on a dedicated physical device;
+ * first-run OS prompt cases still need separately reset installs for full coverage.
  */
 @RunWith(AndroidJUnit4::class)
 class OnboardingAndroidTest {
@@ -45,6 +49,33 @@ class OnboardingAndroidTest {
         app.getSharedPreferences("opencodie_permissions", Context.MODE_PRIVATE)
             .edit().putBoolean("notifications_attempted", false)
             .putBoolean("storage_attempted", false).commit()
+        // A dismissed legacy-target POST_NOTIFICATIONS prompt can return on the
+        // next Activity launch while the channel exists and permission is not
+        // decided. That pauses MainActivity and makes *every* Espresso selector
+        // fail with NoActivityResumedException. Treat the permission as
+        // explicitly denied in the test sandbox only; do not alter app behavior.
+        settleNotificationPromptForNextLaunch()
+    }
+
+    @After fun restoreStableNotificationTestState() {
+        // The first-install prompt test dismisses the dialog via Back; without
+        // this cleanup Android can show it again during the next test.
+        settleNotificationPromptForNextLaunch()
+    }
+
+    private fun settleNotificationPromptForNextLaunch() {
+        if (Build.VERSION.SDK_INT < 33 ||
+            app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_DENIED ||
+            app.getSystemService(NotificationManager::class.java)
+                .getNotificationChannel(OpenCodeService.CHANNEL_ID) == null
+        ) return
+        val result = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            .executeShellCommand("pm set-permission-flags ${app.packageName} " +
+                "android.permission.POST_NOTIFICATIONS user-set")
+        assertTrue("Unable to settle Android's pending notification prompt: $result",
+            !result.contains("Error", ignoreCase = true) &&
+                !result.contains("Exception", ignoreCase = true))
     }
 
     private fun openPermissions(): ActivityScenario<MainActivity> {
@@ -233,4 +264,65 @@ class OnboardingAndroidTest {
         }
     }
 
+
+    @Test fun permissionActionsStayInsideCardsAndMeetTouchMinimum() {
+        openPermissions().use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.findViewById<ViewGroup>(android.R.id.content)
+                val minimum = (48 * activity.resources.displayMetrics.density).toInt()
+                for (kind in listOf("storage", "notifications")) {
+                    val card = root.findViewWithTag<ViewGroup>("permission-$kind-card")
+                    val action = root.findViewWithTag<Button>("permission-$kind-action")
+                    assertTrue("$kind action overflows its card",
+                        action.left >= 0 && action.right <= card.width)
+                    assertTrue("$kind touch target is too short", action.height >= minimum)
+                }
+            }
+        }
+    }
+
+    @Test fun startupStatusSpeaksMeaningInsteadOfOnlyGlyphs() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val view = OnboardingView(activity, object : OnboardingView.Actions {
+                    override fun getStarted() {}
+                    override fun requestStorage() {}
+                    override fun requestNotifications() {}
+                    override fun continueToWorkspace() {}
+                    override fun retry() {}
+                    override fun diagnostics() {}
+                })
+                val root = activity.findViewById<ViewGroup>(android.R.id.content)
+                root.addView(view, ViewGroup.LayoutParams(-1, -1))
+                view.show(OnboardingView.Screen.PREPARING,
+                    startup = StartupTimeline.describe(StartupEvent.UNPACKING_RUNTIME))
+                val step = root.findViewWithTag<TextView>("startup-step-0")
+                assertTrue(step.contentDescription.contains(
+                    activity.getString(R.string.onboarding_stage_in_progress)))
+                root.removeView(view)
+            }
+        }
+    }
+
+    @Test fun normalDarkCardLabelsPassWcagAaContrast() {
+        val config = Configuration(app.resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                Configuration.UI_MODE_NIGHT_YES
+        }
+        val dark = app.createConfigurationContext(config)
+        val foreground = dark.getColor(R.color.onboarding_faint)
+        val background = dark.getColor(R.color.onboarding_surface)
+        fun luminance(c: Int): Double {
+            fun channel(v: Int): Double {
+                val x = v / 255.0
+                return if (x <= 0.04045) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * channel(Color.red(c)) +
+                0.7152 * channel(Color.green(c)) + 0.0722 * channel(Color.blue(c))
+        }
+        val x = luminance(foreground)
+        val y = luminance(background)
+        val ratio = (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05)
+        assertTrue("Dark faint text contrast is $ratio", ratio >= 4.5)
+    }
 }

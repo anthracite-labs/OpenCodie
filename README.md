@@ -64,7 +64,7 @@ This compares setup steps, not model quality, coding capability, or performance.
 
 **Before installing:**
 
-- **Device:** Android **10+** (API 29+) with an **ARM64 / aarch64** CPU.
+- **Device:** Android **10+** (API 29+) with an **ARM64 / aarch64** CPU is supported. The APK permits installing on Android 9 (API 28) for compatibility, but that version has not been validated for release acceptance.
 - **Storage:** Approximately **153 MiB** for the APK, plus space for the extracted runtime.
 - **AI access:** A model/provider supported by OpenCode. The APK includes **no free or offline AI model**; credentials, network access, and charges depend on the provider.
 

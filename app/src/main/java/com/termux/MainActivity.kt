@@ -25,9 +25,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Parcel
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams
 import android.webkit.CookieManager
 import android.webkit.URLUtil
@@ -36,17 +38,22 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CancellationException
 
 /**
  * Shows the OpenCode WebUI served by the bundled server on loopback.
@@ -55,6 +62,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class MainActivity : Activity() {
     private lateinit var webView: WebView
+    private lateinit var root: FrameLayout
+    private var restoredWebHistory: Bundle? = null
+    private var restoredWorkspaceUrl: String? = null
+    private var lastNightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
+    private var webRetryAttempts = 0
+    private var webFailureReason: String? = null
+    private var activeLoadFailed = false
+    private var rendererCrashWindowMs = 0L
+    private var rendererCrashCount = 0
+    private val downloadCancelled = AtomicBoolean(false)
+    private val downloadInProgress = AtomicBoolean(false)
+    private var downloadDialog: AlertDialog? = null
     private lateinit var status: TextView
     private lateinit var retry: Button
     private lateinit var onboarding: OnboardingView
@@ -144,7 +163,13 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         applyStatusTheme()
         webView.settings.textZoom = (resources.configuration.fontScale * 100).toInt()
-        onboarding.refreshTheme()
+        val mode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (lastNightMode != mode) {
+            lastNightMode = mode
+            onboarding.refreshTheme()
+        } else {
+            onboarding.refreshContentWidth()
+        }
         updateOnboarding()
     }
 
@@ -168,6 +193,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lastNightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        restoredWebHistory = savedInstanceState?.getBundle("web_navigation")
+        restoredWorkspaceUrl = savedInstanceState?.getString("workspace_url")?.takeIf {
+            OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+        }
         pendingDownload = savedInstanceState?.getString("pending_download_url")
         val restoredKind = savedInstanceState?.getString("pending_permission")
             ?.let { runCatching { PermissionKind.valueOf(it) }.getOrNull() }
@@ -228,32 +258,12 @@ class MainActivity : Activity() {
         }
         applyStatusTheme()
         retry = Button(this).apply {
-            text = "Retry"
+            text = getString(R.string.onboarding_retry)
             minimumHeight = (48 * resources.displayMetrics.density).toInt()
             visibility = View.GONE
             setOnClickListener { retryCheckNow() }
         }
-        webView = WebView(this).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.textZoom = (resources.configuration.fontScale * 100).toInt()
-            settings.databaseEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            // Secure default: no file access until the user grants storage.
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.allowFileAccessFromFileURLs = false
-            settings.allowUniversalAccessFromFileURLs = false
-            settings.safeBrowsingEnabled = true
-            webViewClient = client
-            webChromeClient = chrome
-            setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                val uri = Uri.parse(url)
-                if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
-                    uri.port == OpenCodeHost.PORT
-                ) download(url, contentDisposition, mimeType)
-            }
-        }
+        webView = createWebView()
         updateWebViewFileAccess()
         val retryLp = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -320,7 +330,7 @@ class MainActivity : Activity() {
         })
         webView.visibility = View.INVISIBLE
         status.visibility = View.GONE
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             addView(webView, LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             addView(status, LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             addView(retry, retryLp)
@@ -341,6 +351,37 @@ class MainActivity : Activity() {
         }
         updateOnboarding()
         poll()
+    }
+
+    /** Reused after renderer termination; never reuse a WebView with a dead renderer. */
+    private fun createWebView(): WebView = WebView(this).apply {
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.textZoom = (resources.configuration.fontScale * 100).toInt()
+        settings.databaseEnabled = true
+        settings.mediaPlaybackRequiresUserGesture = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.allowFileAccessFromFileURLs = false
+        settings.allowUniversalAccessFromFileURLs = false
+        settings.safeBrowsingEnabled = true
+        webViewClient = client
+        webChromeClient = chrome
+        setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            val uri = Uri.parse(url)
+            if (uri.scheme == "http" && uri.host == OpenCodeHost.HOST &&
+                uri.port == OpenCodeHost.PORT
+            ) download(url, contentDisposition, mimeType)
+        }
+    }
+
+    private fun disposeWebView(view: WebView, rendererGone: Boolean = false) {
+        (view.parent as? ViewGroup)?.removeView(view)
+        if (!rendererGone) {
+            view.stopLoading()
+            view.clearHistory()
+        }
+        view.destroy()
     }
 
     /** WebView file:// access stays disabled. Android document-picker content://
@@ -418,7 +459,7 @@ class MainActivity : Activity() {
                     hostError != null -> RuntimeHealth.sanitize(
                         getString(R.string.failed, "[${RuntimeHealth.failureCode(hostError)}] $hostError"),
                     )
-                    webPageFailed -> getString(R.string.onboarding_web_failure)
+                    webPageFailed -> webFailureReason ?: getString(R.string.onboarding_web_failure)
                     else -> null
                 }
             } else null,
@@ -506,69 +547,120 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * All failures hide the authenticated workspace until a new session is verified.
+     * Temporary failures re-pair on bounded backoff; exhausted retries stay actionable.
+     */
+    private fun recordWebFailure(temporary: Boolean, message: String) {
+        if (webUiReady) {
+            restoredWorkspaceUrl = webView.url?.takeIf {
+                OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            }
+        }
+        webUiReady = false
+        activeLoadFailed = true
+        observedServerPairing = null
+        webFailureReason = message
+        webRetryAttempts++
+        webPageFailed = !temporary || !WebRecoveryPolicy.canRetry(webRetryAttempts)
+        nextPairingAttemptAtMs = SystemClock.elapsedRealtime() +
+            WebRecoveryPolicy.delayMs(webRetryAttempts)
+        if (webPageFailed) show(message)
+        updateOnboarding()
+    }
+
     private val client = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (view !== webView) return true
             val url = request.url
-            if (url.scheme == "http" && url.host == OpenCodeHost.HOST && url.port == OpenCodeHost.PORT) return false
-            openExternally(url)
+            if (url.scheme == "http" && url.host == OpenCodeHost.HOST &&
+                url.port == OpenCodeHost.PORT
+            ) return false
+            if (request.isForMainFrame) openExternally(url)
             return true
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            // A completed navigation does not establish an authenticated session.
-            if (!webPageFailed && OnboardingState.isWorkspaceUrl(
-                    url, OpenCodeHost.HOST, OpenCodeHost.PORT,
-                )
-            ) {
-                val pairingAtCheck = OpenCodeHost.pairingUrl
-                val cookies = CookieManager.getInstance().getCookie(url).orEmpty()
-                Thread {
-                    val validSession = runCatching {
-                        OpenCodeHost.hasValidWebSession(cookies)
-                    }.getOrDefault(false)
-                    handler.post {
-                        if (isDestroyed || isFinishing || webPageFailed ||
-                            pairingAtCheck == null || pairingAtCheck != OpenCodeHost.pairingUrl ||
-                            view.url != url
-                        ) return@post
-                        webUiReady = validSession
-                        if (validSession) OpenCodeHost.startup.advance(StartupEvent.WEBVIEW_READY)
-                        if (!validSession) {
-                            webPageFailed = true
-                            show(getString(R.string.onboarding_web_failure))
+            if (view !== webView || activeLoadFailed || webPageFailed ||
+                !OnboardingState.isWorkspaceUrl(url, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            ) return
+            val pairingAtCheck = OpenCodeHost.pairingUrl
+            val cookies = CookieManager.getInstance().getCookie(url).orEmpty()
+            Thread {
+                val result = OpenCodeHost.verifyWebSession(cookies)
+                handler.post {
+                    if (isDestroyed || isFinishing || view !== webView || activeLoadFailed ||
+                        pairingAtCheck == null || pairingAtCheck != OpenCodeHost.pairingUrl ||
+                        view.url != url
+                    ) return@post
+                    when (result) {
+                        SessionValidation.VALID -> {
+                            webUiReady = true
+                            webRetryAttempts = 0
+                            webPageFailed = false
+                            webFailureReason = null
+                            OpenCodeHost.startup.advance(StartupEvent.WEBVIEW_READY)
+                            updateOnboarding()
                         }
-                        updateOnboarding()
+                        SessionValidation.EXPIRED ->
+                            recordWebFailure(true, getString(R.string.onboarding_session_expired))
+                        SessionValidation.TRANSIENT ->
+                            recordWebFailure(true, getString(R.string.onboarding_web_failure))
                     }
-                }.apply { isDaemon = true }.start()
-                Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
-            }
+                }
+            }.apply { isDaemon = true }.start()
+            Thread { CookieManager.getInstance().flush() }.apply { isDaemon = true }.start()
         }
 
         override fun onReceivedHttpError(
             view: WebView, request: WebResourceRequest, response: WebResourceResponse,
         ) {
-            if (!request.isForMainFrame || response.statusCode < 400) return
-            webPageFailed = true
-            webUiReady = false
-            observedServerPairing = null
-            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
-            show(getString(R.string.onboarding_http_failure, response.statusCode))
-            updateOnboarding()
+            if (view !== webView || !request.isForMainFrame || response.statusCode < 400 ||
+                activeLoadFailed
+            ) return
+            val code = response.statusCode
+            // A missing project route is a WebUI-level 404, not a broken server.
+            if (code == 404 && webUiReady) return
+            val recoverable = code == 401 || code == 403 ||
+                WebRecoveryPolicy.isRecoverableHttp(code)
+            recordWebFailure(recoverable, getString(R.string.onboarding_http_failure, code))
         }
 
-        /** The supervisor restarts a dead server; keep the user informed meanwhile. */
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (!request.isForMainFrame) return
-            status.visibility = View.VISIBLE
-            status.text = getString(R.string.reconnecting)
-            webPageFailed = true
+            if (view !== webView || !request.isForMainFrame || activeLoadFailed) return
+            recordWebFailure(true, getString(R.string.onboarding_web_failure))
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            if (view !== webView) {
+                disposeWebView(view, rendererGone = true)
+                return true
+            }
+            fileChooser?.onReceiveValue(null)
+            fileChooser = null
+            val now = SystemClock.elapsedRealtime()
+            if (now - rendererCrashWindowMs > 60_000L) {
+                rendererCrashWindowMs = now
+                rendererCrashCount = 0
+            }
+            rendererCrashCount++
+            Log.w("OpenCodieWeb", if (detail.didCrash()) "Renderer crashed" else "Renderer reclaimed")
+            // Preserve a safe route before disposing the renderer's last usable WebView.
+            restoredWorkspaceUrl = view.url?.takeIf {
+                OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            }
             webUiReady = false
-            show(getString(R.string.onboarding_web_failure))
-            updateOnboarding()
-            // An old WebView load may fail after a server restart; allow a new
-            // session check without replaying any consumed pairing URL.
-            observedServerPairing = null
-            nextPairingAttemptAtMs = SystemClock.elapsedRealtime() + PAIR_RETRY_MS
+            disposeWebView(view, rendererGone = true)
+            webView = createWebView()
+            updateWebViewFileAccess()
+            root.addView(webView, 0, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            // After repeated crashes, never reload the same page in an endless loop.
+            if (rendererCrashCount > 3) {
+                recordWebFailure(false, getString(R.string.onboarding_renderer_failed))
+            } else {
+                recordWebFailure(true, getString(R.string.onboarding_renderer_restarting))
+            }
+            return true
         }
     }
 
@@ -620,7 +712,7 @@ class MainActivity : Activity() {
                 if (hasStoragePermission()) {
                     if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
                 } else {
-                    show("Shared-file access is not enabled; you can try again later")
+                    show(getString(R.string.onboarding_storage_not_enabled))
                 }
                 updateWebViewFileAccess()
                 updateOnboarding()
@@ -642,7 +734,7 @@ class MainActivity : Activity() {
         finishPermissionRequest(PermissionKind.STORAGE)
         if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
-        } else show("Storage permission denied; you can allow it later")
+        } else show(getString(R.string.onboarding_storage_denied))
         updateWebViewFileAccess()
         updateOnboarding()
     }
@@ -706,10 +798,11 @@ class MainActivity : Activity() {
             if (startForResultSafely(intent, STORAGE_SETTINGS_REQUEST)) return
             if (!startForResultSafely(fallback, STORAGE_SETTINGS_REQUEST)) {
                 finishPermissionRequest(PermissionKind.STORAGE)
-                show("Android storage settings unavailable")
+                show(getString(R.string.onboarding_storage_settings_missing))
             }
         } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             if (File(filesDir, ".opencodie-ready").isFile) setupStorageLinks()
+            finishPermissionRequest(PermissionKind.STORAGE)
         } else {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_PERMISSION_REQUEST)
         }
@@ -797,27 +890,120 @@ class MainActivity : Activity() {
         }
         startForResultSafely(intent, SAVE_FILE_REQUEST) {
             pendingDownload = null
-            show("No file picker available")
+            show(getString(R.string.onboarding_no_file_picker))
         }
     }
 
-    /** Stream a local download to the Android document picker without a blocking dialog. */
+    /** Stream an authenticated loopback response with bounded reads and cancellation. */
     private fun save(url: String, destination: Uri) {
-        show(getString(R.string.saving))
+        val source = Uri.parse(url)
+        if (source.scheme != "http" || source.host != OpenCodeHost.HOST ||
+            source.port != OpenCodeHost.PORT
+        ) {
+            show(getString(R.string.download_failed, getString(R.string.onboarding_invalid_download)))
+            return
+        }
+        if (!downloadInProgress.compareAndSet(false, true)) {
+            show(getString(R.string.onboarding_download_busy))
+            return
+        }
+        downloadCancelled.set(false)
+        val progressLabel = TextView(this).apply {
+            text = getString(R.string.onboarding_download_in_progress)
+            setPadding(32, 20, 32, 8)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+        }
+        val contents = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(progressLabel)
+            addView(progressBar, LinearLayout.LayoutParams(-1, 8).apply {
+                leftMargin = 32
+                rightMargin = 32
+                bottomMargin = 24
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.saving)
+            .setView(contents)
+            .setNegativeButton(android.R.string.cancel) { _, _ -> downloadCancelled.set(true) }
+            .create()
+        downloadDialog = dialog
+        dialog.setOnCancelListener { downloadCancelled.set(true) }
+        dialog.show()
         Thread {
+            var connection: HttpURLConnection? = null
+            var completed = false
+            var cancelled = false
+            var partial = false
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
-                CookieManager.getInstance().getCookie(url)?.let { connection.setRequestProperty("Cookie", it) }
-                connection.connectTimeout = 10_000
-                connection.inputStream.use { input ->
+                val request = URL(url).openConnection() as HttpURLConnection
+                connection = request
+                request.instanceFollowRedirects = false
+                request.connectTimeout = 10_000
+                request.readTimeout = 15_000
+                CookieManager.getInstance().getCookie(url)?.let {
+                    request.setRequestProperty("Cookie", it)
+                }
+                val statusCode = request.responseCode
+                check(statusCode in 200..299) { "HTTP $statusCode" }
+                val expected = request.contentLengthLong
+                request.inputStream.use { input ->
                     contentResolver.openOutputStream(destination, "w").use { output ->
-                        checkNotNull(output) { "Could not open $destination" }
-                        input.copyTo(output)
+                        checkNotNull(output) { "Could not open destination" }
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        var displayed = 0L
+                        while (true) {
+                            if (downloadCancelled.get()) throw CancellationException()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            partial = true
+                            output.write(buffer, 0, count)
+                            total += count
+                            if (total - displayed >= 256 * 1024 || total == expected) {
+                                displayed = total
+                                val copied = total
+                                handler.post {
+                                    if (!isDestroyed && !isFinishing && downloadDialog === dialog) {
+                                        if (expected > 0) {
+                                            progressBar.isIndeterminate = false
+                                            progressBar.max = 100
+                                            progressBar.progress = ((copied * 100L) / expected).toInt().coerceIn(0, 100)
+                                        }
+                                        progressLabel.text = getString(R.string.onboarding_download_bytes, copied)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                show(getString(R.string.saved))
+                if (downloadCancelled.get()) throw CancellationException()
+                completed = true
+            } catch (_: CancellationException) {
+                cancelled = true
             } catch (e: Exception) {
-                show(getString(R.string.download_failed, e.message ?: e.toString()))
+                Log.w("OpenCodieDownload", "Download failed (${e.javaClass.simpleName})")
+            } finally {
+                connection?.disconnect()
+                handler.post {
+                    if (downloadDialog === dialog) {
+                        downloadDialog = null
+                        dialog.dismiss()
+                    }
+                    if (!isDestroyed && !isFinishing) {
+                        val message = when {
+                            completed -> getString(R.string.saved)
+                            cancelled -> getString(R.string.onboarding_download_cancelled)
+                            partial -> getString(R.string.onboarding_download_partial)
+                            else -> getString(R.string.onboarding_download_failure)
+                        }
+                        show(message)
+                    }
+                }
+                downloadInProgress.set(false)
             }
         }.apply { isDaemon = true }.start()
     }
@@ -847,10 +1033,20 @@ class MainActivity : Activity() {
                     return@post
                 }
                 destination.onSuccess { target ->
-                    loadedUrl = target
                     webUiReady = false
                     webPageFailed = false
-                    webView.loadUrl(target)
+                    activeLoadFailed = false
+                    val route = restoredWorkspaceUrl?.takeIf {
+                        OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+                    }
+                    val history = if (target == root) restoredWebHistory else null
+                    restoredWebHistory = null
+                    restoredWorkspaceUrl = null
+                    val restored = history != null && runCatching {
+                        webView.restoreState(history) != null
+                    }.getOrDefault(false)
+                    loadedUrl = if (restored) webView.url ?: root else if (target == root) route ?: root else target
+                    if (restored) webView.reload() else webView.loadUrl(loadedUrl!!)
                     updateOnboarding()
                 }.onFailure {
                     observedServerPairing = null
@@ -923,7 +1119,11 @@ class MainActivity : Activity() {
         }
         observedServerPairing = null
         webPageFailed = false
+        activeLoadFailed = false
         webUiReady = false
+        webRetryAttempts = 0
+        rendererCrashCount = 0
+        webFailureReason = null
         nextPairingAttemptAtMs = SystemClock.elapsedRealtime()
         status.visibility = View.VISIBLE
         status.text = getString(R.string.reconnecting)
@@ -937,16 +1137,20 @@ class MainActivity : Activity() {
             getString(R.string.onboarding_web_failure)
         } else OpenCodeHost.startup.snapshot().lastFailure ?: return
         val code = RuntimeHealth.failureCode(error)
-        val details = RuntimeHealth.sanitize("[$code] $error\n\n${OpenCodeHost.sanitizedLog()}")
+        // Diagnostics contain only classified host status/stages, never raw server output.
+        val snapshot = OpenCodeHost.startup.snapshot()
+        val details = RuntimeHealth.sanitize(
+            "[$code] $error\nStatus: ${OpenCodeHost.status}\nStage: ${snapshot.event.name}"
+        )
         AlertDialog.Builder(this)
-            .setTitle("OpenCodie diagnostics")
+            .setTitle(R.string.onboarding_diagnostics_title)
             .setMessage(details.takeLast(2000))
-            .setPositiveButton("Copy") { _, _ ->
+            .setPositiveButton(R.string.onboarding_diagnostics_copy) { _, _ ->
                 val clipboard = getSystemService(ClipboardManager::class.java)
                 clipboard?.setPrimaryClip(ClipData.newPlainText("opencodie-diagnostics", details))
-                show("Diagnostics copied (secrets redacted)")
+                show(getString(R.string.onboarding_diagnostics_copied))
             }
-            .setNegativeButton("Close", null)
+            .setNegativeButton(R.string.onboarding_diagnostics_close, null)
             .show()
             .also { dialog ->
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
@@ -965,10 +1169,16 @@ class MainActivity : Activity() {
     }
 
     private fun openExternally(url: Uri) {
+        if (!WebRecoveryPolicy.allowExternalScheme(url.scheme)) {
+            show(getString(R.string.onboarding_external_link_blocked))
+            return
+        }
         try {
             startActivity(Intent(Intent.ACTION_VIEW, url))
         } catch (_: ActivityNotFoundException) {
-            show(getString(R.string.failed, url.toString()))
+            show(getString(R.string.onboarding_external_app_missing))
+        } catch (_: SecurityException) {
+            show(getString(R.string.onboarding_external_app_missing))
         }
     }
 
@@ -985,7 +1195,17 @@ class MainActivity : Activity() {
     @Deprecated("WebView back navigation")
     override fun onBackPressed() {
         if (firstRun == FirstRun.PERMISSIONS) {
-            firstRun = FirstRun.WELCOME
+            val prefs = getSharedPreferences("opencodie_onboarding", MODE_PRIVATE)
+            if (prefs.getBoolean("completed", false)) {
+                // Dismissing a revocation review must never restart first-run onboarding.
+                getSharedPreferences("opencodie_permissions", MODE_PRIVATE).edit()
+                    .putBoolean("storage_at_continue", hasStoragePermission())
+                    .putBoolean("notifications_at_continue", hasNotificationAccess())
+                    .apply()
+                firstRun = FirstRun.CONTINUE
+            } else {
+                firstRun = FirstRun.WELCOME
+            }
             updateOnboarding()
         } else if (webView.visibility == View.VISIBLE && webView.canGoBack()) {
             webView.goBack()
@@ -995,6 +1215,30 @@ class MainActivity : Activity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        if (webUiReady && !webPageFailed) {
+            val history = webView.copyBackForwardList()
+            val urls = (0 until history.size).mapNotNull { history.getItemAtIndex(it)?.url }
+            val current = webView.url?.takeIf {
+                OnboardingState.isWorkspaceUrl(it, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            }
+            outState.putString("workspace_url", current)
+            if (urls.size == history.size &&
+                WebRecoveryPolicy.safeHistory(urls, OpenCodeHost.HOST, OpenCodeHost.PORT)
+            ) {
+                val navigation = Bundle()
+                if (webView.saveState(navigation) != null) {
+                    val parcel = Parcel.obtain()
+                    try {
+                        parcel.writeBundle(navigation)
+                        if (parcel.dataSize() <= 128 * 1024) {
+                            outState.putBundle("web_navigation", navigation)
+                        }
+                    } finally {
+                        parcel.recycle()
+                    }
+                }
+            }
+        }
         outState.putString("pending_download_url", pendingDownload)
         outState.putString("first_run_step", firstRun.name)
         permissionDecision.pending?.let {
@@ -1006,9 +1250,12 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        downloadCancelled.set(true)
+        downloadDialog?.dismiss()
+        downloadDialog = null
         fileChooser?.onReceiveValue(null)
         fileChooser = null
-        webView.destroy()
+        disposeWebView(webView)
         super.onDestroy()
     }
 

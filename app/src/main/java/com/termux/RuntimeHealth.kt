@@ -59,9 +59,14 @@ object RuntimeHealth {
     fun sanitize(text: String): String {
         var out = text
         out = out.replace(Regex("(?i)opencode_password=\\S+"), "OPENCODE_PASSWORD=REDACTED")
-        out = out.replace(Regex("(?i)authorization:\\s*basic\\s+\\S+"), "Authorization: Basic REDACTED")
-        out = out.replace(Regex("auth/connect/[A-Za-z0-9_-]+"), "auth/connect/REDACTED")
-        out = out.replace(Regex("\"code\"\\s*:\\s*\"[^\"]+\""), "\"code\":\"REDACTED\"")
+        out = out.replace(Regex("(?i)authorization\\s*[:=]\\s*(?:basic|bearer)\\s+\\S+"),
+            "Authorization: REDACTED")
+        out = out.replace(Regex("(?i)auth/connect/[A-Za-z0-9_-]+"), "auth/connect/REDACTED")
+        out = out.replace(Regex("(?i)\"code\"\\s*:\\s*\"[^\"]+\""), "\"code\":\"REDACTED\"")
+        // Handles JSON, dotenv, URL query strings, and common provider configuration names.
+        out = out.replace(Regex("""(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|client[_-]?secret|password|secret)["']?\s*[:=]\s*["']?)[^&\s"']+""")) {
+            it.groupValues[1] + "REDACTED"
+        }
         return out
     }
 }

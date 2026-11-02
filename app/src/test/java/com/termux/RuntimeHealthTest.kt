@@ -50,4 +50,20 @@ class RuntimeHealthTest {
         assertEquals("Configuring Termux packages", RuntimeHealth.installStatus("Configuring Termux packages"))
         assertEquals("Upgrading OpenCode", RuntimeHealth.installStatus("Upgrading OpenCode old -> new"))
     }
+
+    @Test
+    fun sanitizeRedactsProviderCredentialsAndBearerHeaders() {
+        val raw = """
+            Authorization: Bearer very-secret-token
+            apiKey="sk_provider_private"
+            "api_key": "provider-secret"
+            token=another-provider-token
+            https://provider.example/v1?api_key=url-secret&foo=bar
+        """.trimIndent()
+        val clean = RuntimeHealth.sanitize(raw)
+        listOf("very-secret-token", "sk_provider_private", "provider-secret",
+            "another-provider-token", "url-secret").forEach {
+            assertTrue("Leaked credential: $it", it !in clean)
+        }
+    }
 }

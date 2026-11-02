@@ -62,6 +62,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
     private val rippleColor get() = context.getColor(R.color.onboarding_ripple)
 
     private var previousScreen: Screen? = null
+    private var contentColumn: LinearLayout? = null
+    private var scrollContainer: ScrollView? = null
     private var lastPresentation: Presentation? = null
     private var headline: TextView? = null
     private var description: TextView? = null
@@ -84,10 +86,34 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
 
     /** uiMode is handled by MainActivity without recreating the WebView. */
     fun refreshTheme() {
+        val oldScroll = scrollContainer?.scrollY ?: 0
+        val oldFocus = findFocus()?.tag
         previousScreen = null
         lastPresentation?.let {
             show(it.screen, it.title, it.storagePermission, it.notificationsPermission,
                 it.failureMessage, it.startup)
+        }
+        post {
+            scrollContainer?.scrollTo(0, oldScroll)
+            if (oldFocus != null) findViewWithTag<View>(oldFocus)?.requestFocus()
+        }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        post { refreshContentWidth() }
+    }
+
+    /** Keep lines readable on tablets, landscape and split-screen windows. */
+    fun refreshContentWidth() {
+        val column = contentColumn ?: return
+        val available = (scrollContainer?.width ?: width).takeIf { it > 0 } ?: return
+        val params = column.layoutParams as? FrameLayout.LayoutParams ?: return
+        val target = minOf(available, dp(560))
+        if (params.width != target) {
+            params.width = target
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            column.layoutParams = params
         }
     }
 
@@ -125,6 +151,8 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         }
         previousScreen = screen
         removeAllViews()
+        contentColumn = null
+        scrollContainer = null
         setBackgroundColor(backgroundColor)
         headline = null
         description = null
@@ -146,8 +174,12 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(28))
         }
-        scroll.addView(column, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        scroll.addView(column, LayoutParams(LayoutParams.MATCH_PARENT,
+            LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        scrollContainer = scroll
+        contentColumn = column
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        scroll.post { refreshContentWidth() }
 
         val header = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -412,6 +444,14 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             }
             val value = "$glyph  $label"
             if (row.text != value) row.text = value
+            val stateDescription = context.getString(when {
+                index < p.startup.completedCount -> R.string.onboarding_stage_done
+                index == p.startup.completedCount && p.startup.failed -> R.string.onboarding_stage_error
+                index == p.startup.completedCount -> R.string.onboarding_stage_in_progress
+                else -> R.string.onboarding_stage_pending
+            })
+            row.contentDescription = context.getString(R.string.onboarding_stage_accessibility,
+                label, stateDescription)
             row.setTextColor(when {
                 index < p.startup.completedCount -> successColor
                 index == p.startup.completedCount && p.startup.failed -> noticeColor
@@ -479,21 +519,10 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
             setColorFilter(secondaryColor)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(22), dp(22)))
-        val titleLabel = text(title, TypeRole.ACTION, titleColor, true).apply {
-            setPaddingRelative(dp(12), 0, dp(8), 0)
-        }
-        row.addView(titleLabel, LinearLayout.LayoutParams(0, -2, 1f))
-        val control = Button(context).apply {
-            textSize = TypeRole.SUPPORT.sp
-            isAllCaps = false
-            minHeight = dp(48)
-            minWidth = dp(72)
-            setTextColor(accentColor)
-            background = RippleDrawable(ColorStateList.valueOf(rippleColor),
-                rounded(raisedColor, dp(12), borderColor), null)
-            setOnClickListener { action() }
-        }
-        row.addView(control)
+        row.addView(text(title, TypeRole.ACTION, titleColor, true).apply {
+            setPaddingRelative(dp(12), 0, 0, 0)
+            isAccessibilityHeading = true
+        }, LinearLayout.LayoutParams(0, -2, 1f))
         box.addView(row)
         space(box, 8)
         val status = text(context.getString(R.string.onboarding_not_configured),
@@ -503,6 +532,18 @@ internal class OnboardingView(context: Context, private val actions: Actions) : 
         box.addView(status)
         space(box, 4)
         box.addView(text(description, TypeRole.SUPPORT, secondaryColor))
+        space(box, 14)
+        // The action occupies its own row: never trade label readability for button width.
+        val control = Button(context).apply {
+            textSize = TypeRole.SUPPORT.sp
+            isAllCaps = false
+            minHeight = dp(48)
+            setTextColor(accentColor)
+            background = RippleDrawable(ColorStateList.valueOf(rippleColor),
+                rounded(raisedColor, dp(12), borderColor), null)
+            setOnClickListener { action() }
+        }
+        box.addView(control, LinearLayout.LayoutParams(-1, -2))
         parent.addView(box)
         return status to control
     }

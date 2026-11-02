@@ -28,7 +28,8 @@ android {
         minSdk = 28
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Target 28 permits Termux binaries to execute from private app storage;
-        // min <= target is required by AGP.
+        // APK installs on API 28 (Android 9), but Android 10+ is the supported baseline.
+        // min <= target preserves executable runtime compatibility.
         targetSdk = 28
         versionCode = envInt("OPENCODIE_VERSION_CODE", "1")
         versionName = openCodeVersion
@@ -80,8 +81,7 @@ android {
 
 dependencies {
     // Minimal unit-test framework for timeout/regression tests.
-    // Instrumentation tests are intentionally not added: pure-JVM tests with
-    // injected fakes keep the suite runnable without a device or emulator.
+    // Pure-JVM tests with injected fakes run in CI without a device.
     testImplementation("junit:junit:4.13.2")
     // Real Android lifecycle/permission UI regression suite (requires a connected test device).
     androidTestImplementation("androidx.test:core:1.6.1")
