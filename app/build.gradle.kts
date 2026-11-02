@@ -81,8 +81,7 @@ android {
 
 dependencies {
     // Minimal unit-test framework for timeout/regression tests.
-    // Instrumentation tests are intentionally not added: pure-JVM tests with
-    // injected fakes keep the suite runnable without a device or emulator.
+    // Pure-JVM tests with injected fakes run in CI without a device.
     testImplementation("junit:junit:4.13.2")
     // Real Android lifecycle/permission UI regression suite (requires a connected test device).
     androidTestImplementation("androidx.test:core:1.6.1")
